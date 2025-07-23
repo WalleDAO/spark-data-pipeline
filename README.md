@@ -1,1 +1,1 @@
-# Spark Protocol Data Pipeline
+This repository contains documentation and SQL queries for the Spark Protocol data pipeline
