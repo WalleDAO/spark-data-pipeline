@@ -2,9 +2,12 @@
 -- ********************************** SPARK PROTOCOL REVENUE ANALYSIS **********************************
 -- Purpose: Calculate protocol revenue from DAI/USDS lending with accessibility rewards impact
 -- Key Metrics: Gross revenue (reserve factor) vs Net revenue (after borrower rebates)
+-- Data Scope: Daily time series from token launch to current date for DAI/USDS on Ethereum
 -- ********************************** 
 
 -- Step 1: Extract aToken and debtToken contracts for DAI/USDS
+-- Purpose: Get contract addresses and metadata for supply/borrow tracking
+-- Coverage: Only DAI and USDS stablecoins on Spark Protocol
 with spark_tokens as (
     SELECT 
         'ethereum' as blockchain,
@@ -32,7 +35,8 @@ with spark_tokens as (
 ),
 
 -- Step 2: Get latest reserve factors (protocol's share of borrower interest)
--- Formula: Protocol Gross Revenue = Total Borrower Interest × Reserve Factor
+-- Business Logic: Protocol Gross Revenue = Total Borrower Interest × Reserve Factor
+-- Example: If reserve_factor = 0.10, protocol keeps 10% of borrower interest payments
 sparklend_reserve_factor as (
     select 
         t.symbol as token_symbol,
@@ -52,9 +56,10 @@ sparklend_reserve_factor as (
     where rf.rn = 1
 ),
 
--- Step 3: Calculate principal amounts from token events
--- Method: Use liquidity index to separate principal from accrued interest
--- Formula: Principal = (Token Value ± Balance Increase) ÷ Liquidity Index
+-- Step 3: Calculate standardized principal amounts from token events
+-- Key Concept: Use liquidity index to separate principal from accrued interest
+-- Formula: Standardized Principal = (Token Value ± Balance Increase) ÷ Liquidity Index
+-- Purpose: Track normalized "base units" that can be multiplied by current index for actual balance
 sp_transfers_totals as (
     select
         dt,
@@ -62,7 +67,8 @@ sp_transfers_totals as (
         sum(case when category = 'aToken' then amount else 0 end) as supply_amount,
         sum(case when category = 'debtToken' then amount else 0 end) as borrow_amount
     from (
-        -- aToken Mint: User deposits, receives aTokens
+        -- aToken Mint: User deposits, receives aTokens (supply side)
+        -- Calculation: Extract principal by removing accrued interest and dividing by current index
         select
             t.evt_block_date as dt,
             st.category,
@@ -74,7 +80,8 @@ sp_transfers_totals as (
         
         union all
         
-        -- aToken Burn: User withdraws, burns aTokens
+        -- aToken Burn: User withdraws, burns aTokens (supply side)
+        -- Negative amount represents principal reduction
         select
             t.evt_block_date as dt,
             st.category,
@@ -86,7 +93,8 @@ sp_transfers_totals as (
         
         union all
         
-        -- debtToken Mint: User borrows, receives debt tokens
+        -- debtToken Mint: User borrows, receives debt tokens (borrow side)
+        -- Calculation: Extract borrowed principal by removing accrued interest
         select
             t.evt_block_date as dt,
             st.category,
@@ -98,7 +106,8 @@ sp_transfers_totals as (
         
         union all
         
-        -- debtToken Burn: User repays, burns debt tokens
+        -- debtToken Burn: User repays, burns debt tokens (borrow side)
+        -- Negative amount represents debt principal reduction
         select
             t.evt_block_date as dt,
             st.category,
@@ -112,15 +121,17 @@ sp_transfers_totals as (
 ),
 
 -- Step 4: Track ALM (Algorithmic Liquidity Management) activity
--- ALM Proxy: 0x1601843c5E9bC251A3272907010AFa41Fa18347E
--- Purpose: Protocol-owned liquidity management for yield optimization
+-- ALM Address: 0x1601843c5E9bC251A3272907010AFa41Fa18347E
+-- Business Role: Protocol acts as both platform operator AND major liquidity provider
+-- Purpose: Protocol-owned funds for yield optimization and liquidity management
 sp_transfers_alm as (
     select
         symbol,
         dt,
         sum(amount) as alm_supply_amount
     from (
-        -- ALM aToken Mints: Protocol deposits to earn yield
+        -- ALM aToken Mints: Protocol deposits own funds to earn supply yield
+        -- These are protocol-owned funds, not user deposits
         select
             t.evt_block_date as dt,
             st.symbol,
@@ -133,7 +144,7 @@ sp_transfers_alm as (
         
         union all
         
-        -- ALM aToken Burns: Protocol withdraws for liquidity management
+        -- ALM aToken Burns: Protocol withdraws own funds for liquidity management
         select
             t.evt_block_date as dt,
             st.symbol,
@@ -146,7 +157,7 @@ sp_transfers_alm as (
         
         union all
         
-        -- ALM aToken Transfers: Direct transfers (rare)
+        -- ALM aToken Transfers: Direct protocol fund movements (rare edge case)
         select
             t.evt_block_date as dt,
             st.symbol,
@@ -162,6 +173,8 @@ sp_transfers_alm as (
 ),
 
 -- Step 5: Generate continuous daily time series
+-- Purpose: Ensure no missing dates in final output, fill gaps with previous day's balance
+-- Coverage: From token launch date to current date for each token
 seq as (
     select
         t.symbol,
@@ -174,7 +187,9 @@ seq as (
     cross join unnest(sequence(t.start_dt, current_date, interval '1' day)) as s(dt)
 ),
 
--- Step 6: Calculate running principal balances
+-- Step 6: Calculate running cumulative standardized principal balances
+-- Method: Running sum of daily principal changes to get cumulative standardized balances
+-- Note: These are "standardized principals" - multiply by current index to get actual USD values
 sp_balances as (
     select
         dt,
@@ -193,7 +208,9 @@ sp_balances as (
     left join sp_transfers_totals tt using (dt, symbol) 
 ),
 
--- Step 7: Convert to current values using compound interest indices
+-- Step 7: Convert standardized principals to current USD values using compound interest indices
+-- Key Transformation: standardized_principal × current_index = actual_current_balance
+-- Data Source: dune.steakhouse.result_spark_protocol_markets_data provides daily indices and rates
 sp_balances_index as (
     select
         b.dt,
@@ -202,15 +219,15 @@ sp_balances_index as (
         b.symbol as token_symbol,
         i.supply_index,
         i.borrow_index,
-        -- 7-day annualized borrow rate
+        -- 7-day annualized borrow rate: actual realized borrowing cost based on index changes
         (i.borrow_index / lag(i.borrow_index, 7) over (partition by b.symbol order by b.dt asc) - 1) / 7 * 365 as apy_7d,
         i.borrow_rate,
         i.borrow_usd,
-        -- Convert principal to current values
+        -- Convert standardized principals to current actual balances
         b.alm_supply_amount * i.supply_index as alm_supply_amount,
         b.supply_amount * i.supply_index as supply_amount,
         b.borrow_amount * i.borrow_index as borrow_amount,
-        -- Idle liquidity (supplied but not borrowed)
+        -- Idle liquidity: supplied funds not currently borrowed (earning lower yield)
         (b.supply_amount * i.supply_index) - (b.borrow_amount * i.borrow_index) as idle_amount
     from sp_balances b
     left join dune.steakhouse.result_spark_protocol_markets_data i
@@ -218,8 +235,10 @@ sp_balances_index as (
     where i.symbol in ('DAI', 'USDS')
 ),
 
--- Step 8: Integrate accessibility rewards system
--- BR (Base Rate): 4.8% borrower rebate (4.5% base + 0.3% accessibility)
+-- Step 8: Integrate accessibility rewards system (BR program)
+-- BR (Base Rate): 4.8% borrower rebate program (4.5% base + 0.3% accessibility component)
+-- Purpose: Reduce effective borrowing costs to improve protocol accessibility
+-- Impact: Reduces net protocol revenue but increases user adoption
 sp_balances_rates as (
     select
         b.*,
@@ -232,17 +251,18 @@ sp_balances_rates as (
         'BR*' as interest_code,
         i.reward_per as interest_per
     from sp_balances_index b
-    cross join query_5353955 r -- Borrower rebate rates
-    cross join query_5353955 i -- Interest component  
+    cross join query_5353955 r -- Borrower rebate rates configuration
+    cross join query_5353955 i -- Interest calculation component  
     left join sparklend_reserve_factor rf on b.token_symbol = rf.token_symbol
     where r.reward_code = 'BR' and i.reward_code = 'BR'
       and b.dt between r.start_dt and r.end_dt
       and b.dt between i.start_dt and i.end_dt
 ),
 
--- Step 9: Final revenue calculation
--- Gross Revenue = Borrower Interest × Reserve Factor
--- Net Revenue = Gross Revenue - Borrower Rebates
+-- Step 9: Final revenue calculation with gross vs net distinction
+-- Gross Revenue = Total Borrower Interest Payments × Reserve Factor (protocol's share)
+-- Net Revenue = Gross Revenue - Borrower Accessibility Rebates
+-- Business Impact: BR program reduces net revenue but improves user acquisition
 sp_balances_interest as (
     select
         s.dt,
@@ -265,13 +285,14 @@ sp_balances_interest as (
         s.interest_code,
         s.interest_per,
         rf.reserve_factor,
-        -- Gross protocol revenue (before rebates)
+        -- Gross protocol revenue: Total potential revenue before any rebates
         s.borrow_usd * s.borrow_rate * rf.reserve_factor as asset_rev_amount,
-        -- Net protocol revenue (after accessibility rewards)
+        -- Net protocol revenue: Actual revenue after deducting borrower accessibility rewards
         s.borrow_usd * s.borrow_rate * rf.reserve_factor - s.interest_per * s.borrow_usd as interest_amount
     from sp_balances_rates s
     join sparklend_reserve_factor rf using (token_symbol)
 )
 
--- Final Output: Daily revenue analysis for DAI and USDS
+-- Final Output: Daily revenue analysis for DAI and USDS with accessibility rewards impact
+-- Key Insights: Compare asset_rev_amount (gross) vs interest_amount (net) to see BR program impact
 select * from sp_balances_interest order by dt desc
