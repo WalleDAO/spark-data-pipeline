@@ -1,5 +1,6 @@
 -- header
 -- @dev: allocation is shared with Grove. So only 50% of the allocation is Spark’s (and thus, 50% of the yield)
+-- 2025/8/4: actual revenue usde_pay_value + payout_value also needs to divide by 2, 50% is shared with Grove
 
 with
     seq as (
@@ -63,8 +64,9 @@ with
             'APY-BR' as interest_code,
             --coalesce(a.susde_apy, 0) as interest_per,
             greatest(a.susde_apy - i.reward_per, 0) as interest_per,
-            usde_pay_value + payout_value as actual_amount,
-            usde_pay_value + payout_value as actual_amount_usd,
+            -- 50% Grove , 50% Spark
+            (usde_pay_value + payout_value) / 2 as actual_amount,
+            (usde_pay_value + payout_value) / 2 as actual_amount_usd,
             -- 50% Grove , 50% Spark
             (usde_value + susde_value) / 2 as amount,
             (usde_value + susde_value) / 2 as amount_usd -- @todo: should be converted in USD?
