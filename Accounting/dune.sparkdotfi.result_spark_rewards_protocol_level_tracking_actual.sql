@@ -1,4 +1,5 @@
 -- header
+-- 2025/8/4 : corrected the actual revenue and interest calculation approach of ethena
 
 with
     tokens as (
@@ -57,7 +58,7 @@ with
                 case
                     when protocol_name = 'Sparklend' then sl.interest_amount / 365
                     when protocol_name = 'Morpho' and token_symbol in ('DAI', 'USDC') then m.interest_amount / 365
-                    when protocol_name = 'ethena' then (e.actual_amount - e.actual_amount * 0.048) / 365 -- @dev: BR might change
+                    when protocol_name = 'ethena' then e.daily_actual_revenue-e.daily_BR_cost
                     else (p.amount / 365) * p.interest_per
                 end
             ) as tw_interest,
@@ -65,7 +66,7 @@ with
                 case
                     when protocol_name = 'Sparklend' then sl.asset_rev_amount / 365
                     when protocol_name = 'Morpho' and token_symbol in ('DAI', 'USDC') then m.net_rev_interest / 365
-                    when protocol_name = 'ethena' then (e.actual_amount - e.actual_amount * 0.048) / 365 -- @dev: BR might change
+                    when protocol_name = 'ethena' then e.daily_actual_revenue-e.daily_BR_cost
                     else (p.amount / 365) * p.reward_per + (p.amount / 365) * p.interest_per
                 end
             ) as tw_net_rev_interest,
