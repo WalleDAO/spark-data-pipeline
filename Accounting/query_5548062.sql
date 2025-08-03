@@ -71,7 +71,7 @@ with
             -- 50% Grove , 50% Spark
             (usde_value + susde_value) / 2 as amount,
             (usde_value + susde_value) / 2 as amount_usd, -- @todo: should be converted in USD?
-            i.reward_per 
+            i.reward_per as BR_cost_per
         from seq s
         cross join query_5353955 i -- Spark - Accessibility Rewards - Rates: interest
         left join query_5163486 b using (dt) -- Spark - sUSDe yield for USDe
@@ -90,7 +90,7 @@ with
             ) as daily_actual_revenue,
             
             -- 2) daily_BR_cost: amount * reward_per / 365
-            amount * reward_per / 365 as daily_BR_cost
+            amount * BR_cost_per / 365 as daily_BR_cost
             
         from ethena_payout
     )
