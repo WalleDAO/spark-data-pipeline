@@ -1,6 +1,7 @@
 -- header
--- @dev: allocation is shared with Grove. So only 50% of the allocation is Spark’s (and thus, 50% of the yield)
+-- @dev: allocation is shared with Grove. So only 50% of the allocation is Spark's (and thus, 50% of the yield)
 -- 2025/8/4: actual revenue usde_pay_value + payout_value also needs to divide by 2, 50% is shared with Grove
+-- 2025/8/4: added daily_actual_revenue and daily_BR_cost as output
 
 with
     seq as (
@@ -69,7 +70,8 @@ with
             (usde_pay_value + payout_value) / 2 as actual_amount_usd,
             -- 50% Grove , 50% Spark
             (usde_value + susde_value) / 2 as amount,
-            (usde_value + susde_value) / 2 as amount_usd -- @todo: should be converted in USD?
+            (usde_value + susde_value) / 2 as amount_usd, -- @todo: should be converted in USD?
+            i.reward_per 
         from seq s
         cross join query_5353955 i -- Spark - Accessibility Rewards - Rates: interest
         left join query_5163486 b using (dt) -- Spark - sUSDe yield for USDe
@@ -77,7 +79,36 @@ with
         where dt >= date '2024-10-23'
           and i.reward_code = 'BR'
           and dt between i.start_dt and i.end_dt
+    ),
+    final_output as (
+        select
+            *,
+            -- 1) daily_actual_revenue
+            coalesce(
+                actual_amount - lag(actual_amount) over (order by dt), 
+                0
+            ) as daily_actual_revenue,
+            
+            -- 2) daily_BR_cost: amount * reward_per / 365
+            amount * reward_per / 365 as daily_BR_cost
+            
+        from ethena_payout
     )
     
-select * from ethena_payout order by 1 desc
-
+select 
+    dt,
+    blockchain,
+    protocol_name,
+    token_symbol,
+    reward_code,
+    reward_per,
+    interest_code,
+    interest_per,
+    actual_amount,
+    actual_amount_usd,
+    amount,
+    amount_usd,
+    daily_actual_revenue,
+    daily_BR_cost
+from final_output 
+order by dt desc
