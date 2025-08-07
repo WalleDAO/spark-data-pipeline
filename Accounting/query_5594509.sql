@@ -80,7 +80,7 @@ balance_at_date_1 AS (
         oq.stspk_balance_at_date_1,
         oq.stspk_min_balance_during_period,
         oq.stspk_effective_min_balance,
-        COALESCE(b1.cumulative_total_balance, 0) AS savings_susds_balance_at_date_1,
+        COALESCE(b1.cumulative_total_balance, 0) AS savings_susds_susdc_balance_at_date_1,
         sr1.susds_conversion_rate AS susds_rate_at_date_1,
         COALESCE(b1.cumulative_total_balance * sr1.susds_conversion_rate, 0) AS savings_usds_usdc_balance_at_date_1
     FROM overdrive_qualification_list oq
@@ -93,7 +93,7 @@ balance_at_date_1 AS (
 min_balance_during_period AS (
     SELECT 
         oq.user_address,
-        MIN(sb.cumulative_total_balance) AS savings_susds_min_balance_during_period,
+        MIN(sb.cumulative_total_balance) AS savings_susds_susdc_min_balance_during_period,
         MIN(sb.cumulative_total_balance * sb.susds_conversion_rate_at_transaction) AS savings_min_usds_usdc_balance_during_period
     FROM overdrive_qualification_list oq
     LEFT JOIN savings_balances sb ON oq.user_address = sb.user_address
@@ -111,12 +111,12 @@ user_eligibility AS (
         b1.stspk_balance_at_date_1,
         b1.stspk_min_balance_during_period,
         b1.stspk_effective_min_balance,
-        b1.savings_susds_balance_at_date_1,
+        b1.savings_susds_susdc_balance_at_date_1,
         b1.susds_rate_at_date_1,
         b1.savings_usds_usdc_balance_at_date_1,
-        mb.savings_susds_min_balance_during_period,
+        mb.savings_susds_susdc_min_balance_during_period,
         mb.savings_min_usds_usdc_balance_during_period,
-        COALESCE(mb.savings_susds_min_balance_during_period, b1.savings_susds_balance_at_date_1) AS savings_susds_effective_min_balance,
+        COALESCE(mb.savings_susds_susdc_min_balance_during_period, b1.savings_susds_susdc_balance_at_date_1) AS savings_susds_susdc_effective_min_balance,
         COALESCE(mb.savings_min_usds_usdc_balance_during_period, b1.savings_usds_usdc_balance_at_date_1) AS savings_effective_min_usds_usdc_balance,
         CASE 
             WHEN COALESCE(mb.savings_min_usds_usdc_balance_during_period, b1.savings_usds_usdc_balance_at_date_1) >= 1000 
@@ -159,18 +159,23 @@ SELECT
     oc.stspk_balance_at_date_1,
     oc.stspk_min_balance_during_period,
     oc.stspk_effective_min_balance,
-    oc.savings_susds_balance_at_date_1,
+    oc.savings_susds_susdc_balance_at_date_1,
     oc.susds_rate_at_date_1,
     oc.savings_usds_usdc_balance_at_date_1,
-    oc.savings_susds_min_balance_during_period,
+    oc.savings_susds_susdc_min_balance_during_period,
     oc.savings_min_usds_usdc_balance_during_period,
-    oc.savings_susds_effective_min_balance,
+    oc.savings_susds_susdc_effective_min_balance,
     oc.savings_effective_min_usds_usdc_balance,
     oc.boost_qualification_status,
     oc.base_units,
     oc.overdrive_units,
     tu.total_overdrive_units AS overdrive_units_total,
-    oc.max_amount
+    oc.max_amount,
+    269838000 AS spk_unclaimed,
+    LEAST(
+        (oc.overdrive_units * 269838000.0) / tu.total_overdrive_units,
+        oc.max_amount
+    ) AS spk_user
 FROM overdrive_calculations oc
 CROSS JOIN total_units tu
 ORDER BY oc.ignition_spk_amount DESC;
