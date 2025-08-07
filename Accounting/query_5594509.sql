@@ -5,7 +5,7 @@ date_constants AS (
         TIMESTAMP '2025-08-11 14:00:00' AS date_2
 ),
 
-susds_realtime_rates AS (
+susds_realtime_rates_raw AS (
     SELECT 
         evt_block_time,
         evt_index,
@@ -29,6 +29,25 @@ susds_realtime_rates AS (
     )
 ),
 
+susds_realtime_rates AS (
+    SELECT 
+        evt_block_time,
+        evt_index,
+        susds_conversion_rate
+    FROM (
+        SELECT 
+            evt_block_time,
+            evt_index,
+            susds_conversion_rate,
+            ROW_NUMBER() OVER (
+                PARTITION BY evt_block_time 
+                ORDER BY evt_index DESC
+            ) as rn
+        FROM susds_realtime_rates_raw
+    )
+    WHERE rn = 1
+),
+
 base_data AS (
     SELECT 
         b.user_address,
@@ -49,14 +68,13 @@ base_with_rates AS (
         r.susds_conversion_rate,
         ROW_NUMBER() OVER (
             PARTITION BY bd.user_address, bd.evt_block_time, bd.evt_index, bd.evt_tx_hash
-            ORDER BY r.evt_block_time DESC, r.evt_index DESC
+            ORDER BY r.evt_block_time DESC
         ) as rn
     FROM base_data bd
     LEFT JOIN susds_realtime_rates r 
        ON (r.evt_block_time < bd.evt_block_time 
            OR (r.evt_block_time = bd.evt_block_time 
-            AND bd.blockchain = 'ethereum' 
-            AND r.evt_index < bd.evt_index))
+            AND bd.blockchain != 'ethereum'))
 )
 
 SELECT 
