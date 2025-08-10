@@ -35,6 +35,28 @@ with
             ('optimism', 'ALM Proxy', 0x876664f0c9Ff24D1aa355Ce9f1680AE1A5bf36fB, date '2025-06-02'),
             ('unichain', 'ALM Proxy', 0x345E368fcCd62266B3f5F37C9a131FD1c39f5869, date '2025-06-02')
     ),
+    -- Use pre-computed raw transfer data
+    raw_transfers as (
+        select 
+            blockchain,
+            contract_address,
+            dt,
+            ts, -- Now we have precise timestamps!
+            user_addr,
+            amount_change
+        from dune.sparkdotfi.result_spark_s_usds_s_usdc_balance_raw_data
+        where amount_change != 0 -- Only process records with balance changes
+    ),
+    -- Data validation: check total supply
+    total_supply_check as (
+        select
+            blockchain,
+            contract_address,
+            sum(amount_change) as total_amount
+        from raw_transfers
+        group by 1,2
+    ),
+    -- Referral events
     ref_events as (
         select
             blockchain,
@@ -86,9 +108,120 @@ with
                 where tt.symbol = 'sUSDS'
             )
         )
-        --where ref_code between 100 and 999
         group by 1,2,3,4
     ),
+    -- First, calculate running balances for all transactions
+    running_balances as (
+        select 
+            blockchain,
+            contract_address,
+            user_addr,
+            date(ts) as dt,
+            ts,
+            sum(amount_change) over (
+                partition by blockchain, contract_address, user_addr 
+                order by ts asc
+                rows unbounded preceding
+            ) as running_balance
+        from raw_transfers
+    ),
+    -- Get the last balance of each day for each user
+    daily_end_balances as (
+        select 
+            blockchain,
+            contract_address,
+            user_addr,
+            dt,
+            max_by(running_balance, ts) as end_of_day_balance
+        from running_balances
+        group by 1,2,3,4
+    ),
+    -- Calculate start-of-day balances (previous day's end balance)
+    daily_start_balances as (
+        select 
+            blockchain,
+            contract_address,
+            user_addr,
+            dt + interval '1' day as next_dt,
+            end_of_day_balance as start_of_day_balance
+        from daily_end_balances
+    ),
+    -- Combine all balance change points with daily start points
+    time_weighted_balances_with_daily_start as (
+        -- Original balance change records
+        select 
+            blockchain,
+            contract_address,
+            user_addr,
+            dt,
+            ts,
+            running_balance
+        from running_balances
+        
+        union all
+        
+        -- Add 00:00:00 starting points for each day
+        select distinct
+            r.blockchain,
+            r.contract_address,
+            r.user_addr,
+            r.dt,
+            cast(r.dt as timestamp) as ts, -- 00:00:00 of the day
+            coalesce(s.start_of_day_balance, 0) as running_balance
+        from running_balances r
+        left join daily_start_balances s 
+            on r.blockchain = s.blockchain 
+            and r.contract_address = s.contract_address
+            and r.user_addr = s.user_addr
+            and r.dt = s.next_dt
+        where not exists (
+            -- Only add if there's no transaction exactly at 00:00:00
+            select 1 from running_balances r2 
+            where r2.blockchain = r.blockchain 
+              and r2.contract_address = r.contract_address
+              and r2.user_addr = r.user_addr
+              and r2.dt = r.dt
+              and r2.ts = cast(r.dt as timestamp)
+        )
+    ),
+    -- Calculate time intervals for each balance period
+    time_weighted_balances_with_end as (
+        select 
+            blockchain,
+            contract_address,
+            user_addr,
+            dt,
+            ts,
+            running_balance,
+            -- Calculate end time for each balance period
+            coalesce(
+                lead(ts, 1) over (
+                    partition by blockchain, contract_address, user_addr, dt
+                    order by ts asc
+                ),
+                dt + interval '1' day -- End of day for last balance
+            ) as end_time
+        from time_weighted_balances_with_daily_start
+    ),
+    -- Calculate daily time-weighted average balance
+    daily_time_weighted_avg as (
+        select 
+            blockchain,
+            contract_address,
+            user_addr,
+            dt,
+            -- Time-weighted average = Σ(balance × duration) / total_time
+            case 
+                when sum(date_diff('second', ts, end_time)) > 0 then
+                    sum(running_balance * date_diff('second', ts, end_time)) / 
+                    sum(date_diff('second', ts, end_time))
+                else 0
+            end as time_weighted_avg_balance
+        from time_weighted_balances_with_end
+        where date(ts) = dt -- Ensure within the same day
+        group by 1,2,3,4
+    ),
+    -- Get referral users with their start dates
     ref_users as (
         select 
             blockchain,
@@ -98,119 +231,58 @@ with
         from ref_events
         group by 1,2,3
     ),
-    token_transfers as (
-        select
-            blockchain,
-            contract_address,
-            tr.block_date as dt,
-            tr."to" as user_addr,
-            tr.amount_raw / 1e18 as amount
-        from tokens.transfers tr
-        join token_targets ta using (blockchain, contract_address)
-        where date(tr.block_date) >= ta.start_date
-          and "to" != 0x0000000000000000000000000000000000000000
-          and contract_address != 0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD -- sUSDS @ ethereum (retrieved further below)
-        union all
-        select
-            blockchain,
-            contract_address,
-            tr.block_date as dt,
-            tr."from" as user_addr,
-            -tr.amount_raw / 1e18 as amount
-        from tokens.transfers tr
-        join token_targets ta using (blockchain, contract_address)
-        where date(tr.block_date) >= ta.start_date
-          and "from" != 0x0000000000000000000000000000000000000000
-          and contract_address != 0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD -- sUSDS @ ethereum (retrieved further below)
-        union all
-        select
-            'ethereum' as blockchain,
-            contract_address,
-            tr.evt_block_date as dt,
-            tr."to" as user_addr,
-            tr."value" / 1e18 as amount
-        from sky_ethereum.susds_evt_transfer tr
-        join token_targets ta using (contract_address)
-        where "to" != 0x0000000000000000000000000000000000000000
-          and ta.blockchain = 'ethereum'
-        union all
-        select
-            'ethereum' as blockchain,
-            contract_address,
-            tr.evt_block_date as dt,
-            tr."from" as user_addr,
-            -tr."value" / 1e18 as amount
-        from sky_ethereum.susds_evt_transfer tr
-        join token_targets ta using (contract_address)
-        where "from" != 0x0000000000000000000000000000000000000000
-          and ta.blockchain = 'ethereum'
-    ),
-    token_transfers_sum as (
-        select
-            blockchain,
-            contract_address,
-            dt,
-            user_addr,
-            sum(amount) as amount
-        from token_transfers
-        group by 1,2,3,4
-    ),
-    -- just to double check totalSupply is correct
-    total_supply_check as (
-        select
-            blockchain,
-            contract_address,
-            sum(amount) as amount
-        from token_transfers
-        group by 1,2
-    ),
-    -- create time sequence for each token, chain and user, starting from the first date of referral x user
+    -- Create time sequence for each token, chain and user, starting from the first date of referral x user
     time_seq_balances as (
         select
-            s.dt,
-            blockchain,
-            contract_address,
-            user_addr
+            date_seq.dt,
+            u.blockchain,
+            u.contract_address,
+            u.user_addr
         from ref_users u
-        join (select blockchain, contract_address, user_addr, min(dt) as start_date from token_transfers_sum group by 1,2,3) tt
-            using (blockchain, contract_address, user_addr)
-        cross join unnest(sequence(tt.start_date, current_date, interval '1' day)) as s(dt)
+        join (select blockchain, contract_address, user_addr, min(dt) as start_date from daily_time_weighted_avg group by 1,2,3) tt
+            on u.blockchain = tt.blockchain 
+            and u.contract_address = tt.contract_address 
+            and u.user_addr = tt.user_addr
+        cross join unnest(sequence(tt.start_date, current_date, interval '1' day)) as date_seq(dt)
     ),
-    cum_balances as (
-        select
-            blockchain,
-            contract_address,
-            dt,
-            user_addr,
-            sum(coalesce(t.amount, 0)) over (partition by blockchain, contract_address, user_addr order by dt asc) as amount
-        from time_seq_balances s
-        left join token_transfers_sum t using (dt, blockchain, contract_address, user_addr)
-    ),
+    -- Get cumulative time-weighted balances with referral codes
     cum_balances_ref as (
         select
-            blockchain,
-            contract_address,
-            dt,
-            user_addr,
-            amount,
-            coalesce(r.ref_code, last_value(r.ref_code) ignore nulls over (partition by blockchain, contract_address, user_addr order by dt asc)) as ref_code
-        from cum_balances b
-        left join ref_events r using (blockchain, contract_address, dt, user_addr)
+            tsb.blockchain,
+            tsb.contract_address,
+            tsb.dt,
+            tsb.user_addr,
+            coalesce(b.time_weighted_avg_balance, 0) as amount,
+            coalesce(r.ref_code, last_value(r.ref_code) ignore nulls over (partition by tsb.blockchain, tsb.contract_address, tsb.user_addr order by tsb.dt asc)) as ref_code
+        from time_seq_balances tsb
+        left join daily_time_weighted_avg b 
+            on tsb.blockchain = b.blockchain 
+            and tsb.contract_address = b.contract_address
+            and tsb.dt = b.dt
+            and tsb.user_addr = b.user_addr
+        left join ref_events r 
+            on tsb.blockchain = r.blockchain 
+            and tsb.contract_address = r.contract_address
+            and tsb.dt = r.dt
+            and tsb.user_addr = r.user_addr
     ),
+    -- Aggregate total balance by referral code
     total_balance_ref as (
         select
             b.dt,
-            blockchain,
-            contract_address,
+            b.blockchain,
+            b.contract_address,
             tt.symbol as token,
             b.ref_code,
             coalesce(r.integrator_name, 'untagged') as integrator_name,
             sum(b.amount) as amount
         from cum_balances_ref b
-        join token_targets tt using (blockchain, contract_address)
+        join token_targets tt 
+            on b.blockchain = tt.blockchain 
+            and b.contract_address = tt.contract_address
         left join ref_codes r on b.ref_code = r.ref_code
         where b.ref_code is not null
-          and b.ref_code not in (100, 101) -- Already retrievred at protocol-level
+          and b.ref_code not in (100, 101) -- Already retrieved at protocol-level
         group by 1,2,3,4,5,6
     )
 
