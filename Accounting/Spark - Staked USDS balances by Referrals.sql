@@ -1,10 +1,11 @@
 /*
--- @title: Spark - Staked USDS balances by Referrals
--- @description: Retrieves staked USDS balances by referral code in SPK and SKY farms
+-- @title: Spark - Staked USDS balances by Referrals (Time-Weighted)
+-- @description: Retrieves time-weighted staked USDS balances by referral code in SPK and SKY farms
 -- @author: Steakhouse Financial
--- @notes: N/A
+-- @notes: Uses pre-computed time-weighted average balances from query_5595724
 -- @version:
     - 1.0 - 2025-07-11 - Initial version [SJS]
+    - 2.0 - 2025-08-11 - Updated to use time-weighted averages [SJS]
 */
 
 with
@@ -29,49 +30,61 @@ with
         join farm_addr f using (contract_address)
         group by 1,2,3
     ),
-    -- Get staked USDS amount from farms
-    staked_sum as (
+    -- Get time-weighted average staked USDS balances from pre-computed table
+    time_weighted_balances as (
         select
-            t.evt_block_date as dt,
-            f.contract_address,
-            if(t."to" = f.contract_address, t."from", t."to") as user_addr,
-            sum(
-                if("to" = f.contract_address, t."value", -t."value")
-            ) / 1e18 as amount
-        from sky_ethereum.usds_evt_transfer t
-        cross join farm_addr f
-        where f.contract_address in (t."from", t."to") -- Sky: Staking Reward
-        group by 1,2,3
+            t.blockchain,
+            t.contract_address,
+            t.user_addr,
+            t.dt,
+            t.time_weighted_avg_balance as amount
+        from query_5595724 t -- Pre-computed time-weighted average balances
+        join farm_addr f on t.contract_address = f.contract_address
+        where t.time_weighted_avg_balance > 1e-6 -- Filter out dust amounts
     ),
-    -- Create time sequence for each user with staked USDS
+    -- Create complete time sequence for each user with time-weighted balances
     time_seq_balances as (
         select
+            t.user_addr,
+            t.contract_address,
+            seq.dt
+        from (
+            select 
+                user_addr, 
+                contract_address, 
+                min(dt) as start_dt,
+                max(dt) as end_dt
+            from time_weighted_balances 
+            group by 1,2
+        ) t
+        cross join unnest(sequence(t.start_dt, t.end_dt, interval '1' day)) as seq(dt)
+    ),
+    -- Fill forward balances and referral codes
+    balances_with_ref as (
+        select
+            s.dt,
             s.user_addr,
             s.contract_address,
-            seq.dt
-        from (select user_addr, contract_address, min(dt) as start_dt from staked_sum group by 1,2) s
-        cross join unnest(sequence(s.start_dt, current_date, interval '1' day)) as seq(dt)
-    ),
-    -- Cumulative user balances by referral
-    staked_cum_ref as (
-        select
-            dt,
-            user_addr,
-            contract_address,
-            sum(coalesce(b.amount, 0)) over (partition by contract_address, user_addr order by dt asc) as amount,
-            coalesce(r.ref_code, last_value(r.ref_code) ignore nulls over (partition by contract_address, user_addr order by dt asc)) as ref_code
+            coalesce(b.amount, 0) as amount,
+            coalesce(
+                r.ref_code, 
+                last_value(r.ref_code) ignore nulls over (
+                    partition by s.contract_address, s.user_addr 
+                    order by s.dt asc 
+                    rows unbounded preceding
+                )
+            ) as ref_code
         from time_seq_balances s
-        left join staked_sum b using (dt, contract_address, user_addr)
+        left join time_weighted_balances b using (dt, contract_address, user_addr)
         left join ref_events r using (dt, contract_address, user_addr)
     ),
-    -- Cumulative user balances by integrator name, removing dust amounts
+    -- Final aggregation by referral integrator
     staked_final as (
         select
             s.dt,
             'ethereum' as blockchain,
             0xdC035D45d973E3EC169d2276DDab16f1e407384F as contract_address, -- USDS
             f.farm_name as token,
-            --coalesce(s.ref_code, 127) as ref_code,
             coalesce(
                 s.ref_code,
                 if(f.farm_code = 1, 127, 99) -- If SPK farm, 127 ('Spark unknown'); otherwise, 99 ('Unknown')
@@ -81,12 +94,14 @@ with
                 when r.integrator_name is null then 'Others'
                 else r.integrator_name
             end as integrator_name,
-            if(sum(s.amount) > 1e-6, sum(s.amount), 0) as amount -- hide dust
-        from staked_cum_ref s
+            sum(s.amount) as amount -- Sum time-weighted averages across users
+        from balances_with_ref s
         join farm_addr f using (contract_address)
         left join ref_codes r on s.ref_code = r.ref_code
-        group by 1,4,5,6
+        where s.amount > 0 -- Only include positive balances
+        group by 1,2,3,4,5,6
     )
 
-select * from staked_final order by dt desc, token desc, amount desc
-
+select * 
+from staked_final 
+order by dt desc, token desc, amount desc;
