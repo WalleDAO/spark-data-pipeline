@@ -101,7 +101,7 @@ with
             b.performance_fee,
             b.supply_apy,
             if(b.token_symbol = 'DAI', 'NA', concat(i.reward_code, '*')) as interest_code,
-            if(b.token_symbol = 'DAI', 0, b.supply_apy - i.reward_per + b.performance_fee) as interest_per
+            if(b.token_symbol = 'DAI', 0, b.supply_apy - i.reward_per) as interest_per
         from vault_balances b
         cross join query_5353955 i -- Spark - Accessibility Rewards - Rates - > interest
         where i.reward_code = 'BR'
@@ -110,8 +110,8 @@ with
     vault_balances_interest as (
         select
             *,
-            alm_idle * interest_per  as interest_amount,
-            alm_idle * (reward_per + interest_per) as net_rev_interest  
+            supply_amount * interest_per  as interest_amount,
+            supply_amount * (reward_per + interest_per) as net_rev_interest  
         from vault_balances_rates
     )
 
