@@ -13,6 +13,7 @@ with
             f.contract_address,
             date(t.evt_block_time) as dt,
             t.evt_block_time as ts,
+            t.evt_block_number,
             t.evt_tx_hash,
             t.evt_index,
             if(t."to" = f.contract_address, t."from", t."to") as user_addr,
@@ -29,11 +30,12 @@ with
             user_addr,
             date(ts) as dt,
             ts,
+            evt_block_number,
             evt_tx_hash,
             evt_index,
             sum(amount_change) over (
                 partition by blockchain, contract_address, user_addr 
-                order by ts asc, evt_index asc, evt_tx_hash asc
+                order by evt_block_number asc, evt_index asc
                 rows unbounded preceding
             ) as running_balance
         from raw_transfers
@@ -55,7 +57,7 @@ with
                 running_balance,
                 row_number() over (
                     partition by blockchain, contract_address, user_addr, dt
-                    order by ts desc, evt_index desc, evt_tx_hash desc
+                    order by evt_block_number desc, evt_index desc
                 ) as rn
             from running_balances
         ) t
@@ -110,6 +112,7 @@ with
             user_addr,
             dt,
             ts,
+            evt_block_number,
             evt_tx_hash,
             evt_index,
             running_balance
@@ -124,6 +127,7 @@ with
             s.user_addr,
             s.dt,
             cast(s.dt as timestamp) as ts, -- 00:00:00 of the day
+            0 as evt_block_number, -- Special block number for daily start points
             from_hex('0000000000000000000000000000000000000000000000000000000000000000') as evt_tx_hash,
             -1 as evt_index, -- Special evt_index for daily start points
             s.start_of_day_balance as running_balance
@@ -138,6 +142,7 @@ with
             user_addr,
             dt,
             ts,
+            evt_block_number,
             evt_tx_hash,
             evt_index,
             running_balance,
@@ -145,7 +150,7 @@ with
             coalesce(
                 lead(ts, 1) over (
                     partition by blockchain, contract_address, user_addr, dt
-                    order by ts asc, evt_index asc, evt_tx_hash asc
+                    order by evt_block_number asc, evt_index asc
                 ),
                 dt + interval '1' day -- End of day for last balance
             ) as end_time
