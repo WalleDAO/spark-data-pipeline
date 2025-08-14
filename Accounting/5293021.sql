@@ -108,8 +108,11 @@ with
             -- staking
             coalesce(us.num_users, 0) as num_users_staked,
             coalesce(st.amount, 0) as amount_staked,
-            sum(coalesce(st.amount, 0)) over (order by dt asc) as total_amount_staked
-            -- 300_000_000 as max_amount_ignition -- commented out
+            sum(coalesce(st.amount, 0)) over (order by dt asc) as total_amount_staked,
+            -- max amounts for each campaign
+            300_000_000 as max_amount_ignition,
+            170_000_000 as max_amount_overdrive,
+            170_000_000 as max_amount_s1_points
         from time_seq s
         left join claims_sum c using (dt)
         left join user_claims u using (dt)
@@ -131,14 +134,22 @@ with
             total_amount_claimed_s1_points,
             total_amount_claimed_prefarming,
             total_amount_claimed_other,
-            -- max_amount_ignition, -- commented out
-            -- if(total_amount_claimed_ignition / max_amount_ignition < 1e-6, 0, total_amount_claimed_ignition / max_amount_ignition) as total_per_ignition, -- commented out
+            -- max amounts
+            max_amount_ignition,
+            max_amount_overdrive,
+            max_amount_s1_points,
+            -- claim percentages
+            if(total_amount_claimed_ignition / max_amount_ignition < 1e-6, 0, total_amount_claimed_ignition / max_amount_ignition) as total_per_ignition,
+            if(total_amount_claimed_overdrive / max_amount_overdrive < 1e-6, 0, total_amount_claimed_overdrive / max_amount_overdrive) as total_per_overdrive,
+            if(total_amount_claimed_s1_points / max_amount_s1_points < 1e-6, 0, total_amount_claimed_s1_points / max_amount_s1_points) as total_per_s1_points,
+            -- user counts
             num_users_claimed,
             num_users_claimed_ignition,
             num_users_claimed_overdrive,
             num_users_claimed_s1_points,
             num_users_claimed_prefarming,
             num_users_claimed_other,
+            -- staking data
             amount_staked,
             total_amount_staked,
             num_users_staked
