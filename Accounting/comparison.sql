@@ -38,7 +38,7 @@ with
             t.time_weighted_avg_balance as amount
         from query_5595724 t -- Pre-computed time-weighted average balances
         join farm_addr f on t.contract_address = f.contract_address
-        where t.time_weighted_avg_balance > 1e-6 -- Filter out dust amounts
+        where t.time_weighted_avg_balance > 0 -- Filter out dust amounts
     ),
     -- Create time sequence for each user with time-weighted balances
     time_seq_balances as (
@@ -77,7 +77,7 @@ with
                 when r.integrator_name is null then 'Others'
                 else r.integrator_name
             end as integrator_name,
-            if(sum(s.amount) > 1e-6, sum(s.amount), 0) as amount -- hide dust
+            sum(s.amount) as amount 
         from staked_cum_ref s
         join farm_addr f on s.contract_address = f.contract_address
         left join ref_codes r on s.ref_code = r.ref_code
