@@ -77,7 +77,7 @@ with
                 when r.integrator_name is null then 'Others'
                 else r.integrator_name
             end as integrator_name,
-            sum(s.amount) as amount -- hide dust
+            sum(s.amount) as amount 
         from staked_cum_ref s
         join farm_addr f on s.contract_address = f.contract_address
         left join ref_codes r on s.ref_code = r.ref_code
