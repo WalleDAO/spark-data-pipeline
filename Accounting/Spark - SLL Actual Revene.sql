@@ -20,7 +20,6 @@ with
                      then m.net_rev_interest / 365
                 else (amount / 365) * p.reward_per + (p.amount / 365) * p.interest_per
             end as tw_net_rev_interest_day --> only for projection
-            --amount_usd
         from (
             select dt,
                 blockchain,
@@ -130,10 +129,10 @@ with
             token_symbol,
             concat(protocol_name, ' - ', token_symbol) as "protocol-token",
             p.reward_code,
-            p.reward_per,
+            sum(p.reward_per*p.amount)/sum(p.amount) as reward_per,
             p.interest_code,
-            avg(p.interest_per) as interest_per_aprox, -- for APYs that change every day, it's an approximation
-            sum(p.amount) / 365 as tw_amount, -- @DEV: keep temporarily
+            sum(p.interest_per*p.amount)/sum(p.amount)as interest_per_aprox, 
+            sum(p.amount) / 365 as tw_amount, 
             sum((p.amount / 365) * p.reward_per) as tw_rebate,
             sum(
                 case
