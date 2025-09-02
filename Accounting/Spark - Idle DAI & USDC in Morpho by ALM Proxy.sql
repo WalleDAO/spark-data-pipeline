@@ -1,10 +1,9 @@
--- @dev: As DAI is a leveraged vault, we earn neglible AR rebate here so we would just set this to zero
-
 with
     sp_vault_addr (blockchain, category, symbol, vault_addr, start_date) as (
         values
         ('ethereum', 'vault', 'spDAI', 0x73e65dbd630f90604062f6e02fab9138e713edd9, date '2024-03-15'), -- Spark DAI Vault @ Ethereum
-        ('base', 'vault', 'spUSDC', 0x7BfA7C4f149E7415b73bdeDfe609237e29CBF34A, date '2024-12-30')     -- Spark USDC Vault @ Base
+        ('base', 'vault', 'spUSDC', 0x7BfA7C4f149E7415b73bdeDfe609237e29CBF34A, date '2024-12-30'),     -- Spark USDC Vault @ Base
+        ('ethereum', 'vault', 'spUSDS', 0xe41a0583334f0dc4e023acd0bfef3667f6fe0597, date '2025-07-16') -- Spark USDS Vault @ Ethereum
     ),
     sp_alm_addr (blockchain, category, symbol, alm_addr, start_date) as (
         values
@@ -56,13 +55,12 @@ with
             v.vault_address as vault_addr,
             v.token_symbol,
             v.dt,
-            v.share_price_usd as supply_index, -- deducts performance fees
-            --v.markets_supply_rate as supply_index, -- does not deduct performance fees
+            v.supply_index, 
             v.markets_supply_rate as supply_apy,
             v.utilization_rate,
             v.performance_fee,
-            v.supply_usd as supply_amount,
-            v.supply_usd * (1 - v.utilization_rate) as idle_amount
+            v.supply_amount,
+            v.supply_amount * (1 - v.utilization_rate) as idle_amount
         from dune.steakhouse.result_morpho_vaults_data v
         join sp_vault_addr va
             on v.blockchain = va.blockchain
@@ -78,7 +76,7 @@ with
             v.utilization_rate as util_rate,
             v.performance_fee,
             v.supply_apy,
-            sum(coalesce(t.shares * v.supply_index, 0)) over (partition by blockchain, vault_addr, user_addr order by dt asc) as alm_supply_amount,
+            sum(coalesce(t.shares, 0)) over (partition by blockchain, vault_addr, user_addr order by dt asc) * v.supply_index as alm_supply_amount,
             v.supply_amount,
             v.idle_amount
         from seq s
@@ -99,19 +97,21 @@ with
             'NA' as reward_code,
             0 as reward_per,
             b.performance_fee,
-            b.supply_apy,
-            if(b.token_symbol = 'DAI', 'NA', 'APY-BR') as interest_code,
-            if(b.token_symbol = 'DAI', 0, b.supply_apy - i.reward_per) as interest_per
+            b.supply_apy as supply_apr ,
+            'APR-BR' as interest_code,
+            b.supply_apy - i.reward_per as interest_per
         from vault_balances b
-        cross join query_5353955 i -- Spark - Accessibility Rewards - Rates - > interest
+        cross join query_5353955 i -- Spark - Accessibility Rewards - Rates
         where i.reward_code = 'BR'
           and b.dt between i.start_dt and i.end_dt
     ),
     vault_balances_interest as (
         select
             *,
-            supply_amount * interest_per  as interest_amount,
-            supply_amount * (reward_per + interest_per) as net_rev_interest  
+            case when token_symbol='USDC' then supply_amount * interest_per
+            else (supply_amount-idle_amount) * interest_per end as interest_amount,
+            case when token_symbol='USDC' then supply_amount * interest_per
+            else (supply_amount-idle_amount) * interest_per end as net_rev_interest  
         from vault_balances_rates
     )
 
