@@ -350,7 +350,7 @@ with
             s.alm_idle,
             s.reward_code,
             s.reward_per,
-            'APY-BR' as interest_code,
+            'APR-BR' as interest_code,
             s.borrow_rate_apr-s.reward_per as interest_per,  -- Use APR for interest calculation
             rf.reserve_factor,
             s.sofr,
