@@ -6,6 +6,7 @@
 -- @dev: 90d APY seems to be the closer one to Maple's UI
 -- @version:
     - 1.0 - 2025-07-26 - Initial version [SJS]
+    - 1.1 - 2025-09-02 - Added APY→APR conversion for accurate daily calculations
 */
 
 with
@@ -90,13 +91,19 @@ with
             amount,
             'NA' as reward_code,
             0 as reward_per,
-            'APY-BR' as interest_code,
-            apy_90d - i.reward_per as interest_per,
+            'APR-BR' as interest_code,
+            -- APY→APR conversion using precise formula
+            case when apy_7d is not null then 365 * (exp(ln(1 + apy_7d) / 365) - 1) end as supply_apr_7d,
+            case when apy_30d is not null then 365 * (exp(ln(1 + apy_30d) / 365) - 1) end as supply_apr_30d,
+            case when apy_90d is not null then 365 * (exp(ln(1 + apy_90d) / 365) - 1) end as supply_apr_90d,
+            -- Updated interest calculation using APR
+            case when apy_90d is not null then 365 * (exp(ln(1 + apy_90d) / 365) - 1) - i.reward_per end as interest_per,
+            -- Keep original APY for reference
             apy_7d,
             apy_30d,
             apy_90d
         from syrup_apy
-        cross join query_5353955 i -- Spark - Accessibility Rewards - Rates: interest
+        cross join query_5353955 i -- Spark - Accessibility Rewards - Rates: interest (already APR)
         where i.reward_code = 'BR'
           and dt between i.start_dt and i.end_dt
     )
