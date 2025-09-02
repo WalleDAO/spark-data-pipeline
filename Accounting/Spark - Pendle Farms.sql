@@ -7,6 +7,7 @@
 -- @version:
     - 1.0 - 2025-07-17 - Initial version [SJS]
     - 1.1 - 2025-07-28 - Setting 0.2% to pool USDS-14AUG2025
+    - 1.2 - 2025-09-02 - Updated to use APR rates from query_5353955 [APY→APR conversion]
 */
 
 with
@@ -74,15 +75,16 @@ with
             'Pendle' as protocol_name,
             b.symbol as token_symbol,
             if(b.symbol = 'SY-USDS', concat(r.reward_code, '*'), r.reward_code) as reward_code,
-            -- Pendle USDS points -> since Spark offers leverage on it via the Morpho DAI vault against PT-USDS, we need to deduct off 40bps
-            if(b.symbol = 'SY-USDS', 0.002, r.reward_per) as reward_per,
+            -- Pendle USDS points -> deduct 40bps using APR conversion
+            -- Convert 0.2% APY to APR: 365 * (exp(ln(1 + 0.002) / 365) - 1)
+            if(b.symbol = 'SY-USDS', 365 * (exp(ln(1 + 0.002) / 365) - 1), r.reward_per) as reward_per,
             i.reward_code as interest_code,
             i.reward_per as interest_per,
             amount as amount,
             amount as amount_usd
         from supply_cum b
-        cross join query_5353955 r-- Spark - Accessibility Rewards - Rates -> rebates
-        cross join query_5353955 i-- Spark - Accessibility Rewards - Rates -> interest
+        cross join query_5353955 r-- Spark - Accessibility Rewards - Rates -> rebates (now APR)
+        cross join query_5353955 i-- Spark - Accessibility Rewards - Rates -> interest (now APR)
         where r.reward_code = 'XR'
           and b.dt between r.start_dt and r.end_dt
           and i.reward_code = 'NA'
