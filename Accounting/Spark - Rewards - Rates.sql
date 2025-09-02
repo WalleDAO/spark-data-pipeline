@@ -32,10 +32,11 @@ WITH
             t.reward_description,
             CASE 
                 WHEN t.reward_code = 'SR' THEN s.ssr_rate
-                WHEN t.reward_code = 'AR' AND r.is_2025_special THEN s.ssr_rate + 0.006
-                WHEN t.reward_code = 'AR' AND NOT r.is_2025_special THEN s.ssr_rate + 0.002
-                WHEN t.reward_code = 'BR' THEN s.ssr_rate + 0.003
-            END AS reward_per,
+                -- Compound APY calculation (Option B): (1 + SR_APY) × (1 + additional_APY) - 1
+                WHEN t.reward_code = 'AR' AND r.is_2025_special THEN (1 + s.ssr_rate) * (1 + 0.006) - 1
+                WHEN t.reward_code = 'AR' AND NOT r.is_2025_special THEN (1 + s.ssr_rate) * (1 + 0.002) - 1
+                WHEN t.reward_code = 'BR' THEN (1 + s.ssr_rate) * (1 + 0.003) - 1
+            END AS reward_per_apy,
             GREATEST(s.start_date, r.start_dt) AS start_dt,
             LEAST(s.end_date, r.end_dt) AS end_dt
         FROM ssr_periods s
@@ -57,7 +58,7 @@ WITH
         SELECT 
             reward_code, 
             reward_description, 
-            reward_per, 
+            reward_per_apy, 
             start_dt, 
             end_dt
         FROM (
@@ -65,10 +66,34 @@ WITH
                 ('XR', 'Accessibility Rewards', 0.006, date '2024-01-01', date '2025-12-31'),
                 ('XR', 'Accessibility Rewards', 0.002, date '2026-01-01', date '2030-12-31'),
                 ('NA', 'Not Applicable', 0, date '2024-01-01', date '2030-12-31')
-        ) AS t(reward_code, reward_description, reward_per, start_dt, end_dt)
+        ) AS t(reward_code, reward_description, reward_per_apy, start_dt, end_dt)
     )
 
-SELECT * FROM dynamic_rewards
+SELECT 
+    reward_code,
+    reward_description,
+    reward_per_apy,
+    start_dt,
+    end_dt,
+    -- Convert APY to APR for accurate daily revenue calculations
+    -- Formula: APR = 365 * ((1 + APY)^(1/365) - 1)
+   CASE 
+    WHEN reward_per_apy = 0 THEN 0.0
+    ELSE 365.0 * (exp(ln(cast(1.0 + reward_per_apy as double)) / 365.0) - 1.0)
+END AS reward_per
+FROM dynamic_rewards
 UNION ALL
-SELECT * FROM static_rewards
+SELECT 
+    reward_code,
+    reward_description,
+    reward_per_apy,
+    start_dt,
+    end_dt,
+    -- Convert APY to APR for accurate daily revenue calculations
+    -- Formula: APR = 365 * ((1 + APY)^(1/365) - 1)
+    CASE 
+    WHEN reward_per_apy = 0 THEN 0.0
+    ELSE 365.0 * (exp(ln(cast(1.0 + reward_per_apy as double)) / 365.0) - 1.0)
+END AS reward_per
+FROM static_rewards
 ORDER BY start_dt DESC, reward_code;
