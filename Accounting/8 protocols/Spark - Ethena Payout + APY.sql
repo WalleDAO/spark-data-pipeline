@@ -1,5 +1,4 @@
-with -- Generate daily sequence from launch date to current date
-seq as (
+with seq as (
     select
         dt
     from unnest(
@@ -10,74 +9,80 @@ seq as (
             )
         ) as t(dt)
 ),
--- Calculate daily sUSDe balance changes (mints and burns)
-susde_balance as (
+-- Calculate daily staking activities from StakedUSDeV2 events
+daily_staking_data as (
     select
-        evt_block_date as dt,
-        sum(
-            if(
-                "from" = 0x0000000000000000000000000000000000000000,
-                "value",
-                - "value"
-            )
-        ) / 1e18 as amount
-    from ethena_labs_ethereum.stakedusdev2_evt_transfer
-    where
-        0x0000000000000000000000000000000000000000 in ("from", "to")
+        date(evt_block_time) as dt,
+        coalesce(sum(assets/1e18), 0) as daily_deposits
+    from ethena_labs_ethereum.StakedUSDeV2_evt_Deposit
+    where date(evt_block_time) >= date('2023-11-14')
+    group by 1
+    
+    union all
+    
+    select
+        date(evt_block_time) as dt,
+        -coalesce(sum(assets/1e18), 0) as daily_deposits
+    from ethena_labs_ethereum.StakedUSDeV2_evt_Withdraw
+    where date(evt_block_time) >= date('2023-11-14')
     group by 1
 ),
--- Calculate cumulative sUSDe balance over time
-susde_balance_cum as (
+-- Aggregate daily net staking changes
+daily_net_staking as (
     select
         dt,
-        sum(coalesce(amount, 0)) over (
-            order by dt
-        ) as amount
-    from seq
-    left join susde_balance b
-        using (dt)
+        sum(daily_deposits) as net_daily_staking
+    from daily_staking_data
+    group by 1
 ),
--- Extract daily USDe rewards sent to StakingRewardsDistributor
-usde_returned as (
+-- Calculate daily protocol returns from USDe transfers
+daily_data as (
     select
-        evt_block_date as dt,
-        sum("value") / 1e18 as interest_amount
+        date(evt_block_time) as dt,
+        sum(
+            case
+                when "to" = 0xf2fa332bd83149c66b09b45670bce64746c6b439
+                    then value / 1e18
+                else 0
+            end
+        ) as daily_protocol_return
     from ethena_labs_ethereum.usde_evt_transfer
     where
-        "to" = 0xf2fa332bd83149c66b09b45670bce64746c6b439 -- StakingRewardsDistributor
+        date(evt_block_time) >= date('2023-11-14')
+        and "to" = 0xf2fa332bd83149c66b09b45670bce64746c6b439 -- StakingRewardsDistributor
     group by 1
 ),
--- Fill missing dates with zero interest
-usde_returned_cum as (
+-- Calculate cumulative staked USDe balance over time
+balances_cum as (
     select
-        dt,
-        coalesce(interest_amount, 0) as interest_amount
-    from seq
-    left join usde_returned b
-        using (dt)
+        s.dt,  
+        sum(coalesce(d.net_daily_staking, 0)) over (order by s.dt) as total_staked_usde
+    from seq s
+    left join daily_net_staking d
+        on s.dt = d.dt
 ),
--- Calculate APY using 7-day rolling average for smoothing
+-- Calculate sUSDe APY using 7-day rolling average with weekly compounding
 susde_apy as (
     select
         dt,
-        daily_rate,
-        -- Daily compounding APY: (1 + daily_rate)^365 - 1
-        POWER(1 + daily_rate, 365) - 1 AS susde_apy,
-        daily_rate * 365 AS susde_apr
+        POWER(1 + weekly_avg_daily_rate * 7, 52) - 1 AS susde_apy,
+        weekly_avg_daily_rate * 365 AS susde_apr
     from (
-            select
-                dt,
-                -- 7-day rolling average of daily yield rate
-                avg(r.interest_amount / nullif(b.amount, 0)) over (
-                    order by dt rows between 6 preceding
-                        and current row
-                ) as daily_rate
-            from susde_balance_cum b
-            join usde_returned_cum r
-                using (dt)
-        )
+        select
+            dt, 
+            avg(coalesce(daily_protocol_return, 0)) over (
+                order by dt rows between 6 preceding and current row
+            ) / nullif(
+                avg(total_staked_usde) over (
+                    order by dt rows between 6 preceding and current row
+                ),
+                0
+            ) as weekly_avg_daily_rate
+        from balances_cum b
+        left join daily_data d using (dt)
+    )
 ),
--- Combine with Spark protocol data (50% allocation)
+-- Combine all data for Ethena protocol analysis
 ethena_payout as (
     select
         dt,
@@ -90,15 +95,13 @@ ethena_payout as (
         a.susde_apy,
         a.susde_apr,
         a.susde_apr - i.reward_per as interest_per,
-        -- 50% Grove allocation, 50% Spark allocation
         (usde_pay_value + payout_value) / 2 as actual_amount,
-        -- 50% Grove allocation, 50% Spark allocation
         (usde_value + susde_value + u_usde_value) / 2 as amount,
         i.reward_per as BR_cost_per
     from seq s
-    cross join query_5353955 i -- Spark - Accessibility Rewards - Rates: interest (already APR)
+    cross join query_5353955 i
     left join query_5163486 b
-        using (dt) -- Spark - sUSDe yield for USDe
+        using (dt)
     left join susde_apy a
         using (dt)
     where
@@ -107,11 +110,10 @@ ethena_payout as (
         and dt between i.start_dt
         and i.end_dt
 ),
--- Calculate daily metrics
+-- Calculate daily revenue and BR costs
 final_output as (
     select
         *,
-        -- Daily actual revenue (difference from previous day)
         coalesce(
             actual_amount - lag(actual_amount) over (
                 order by dt
@@ -120,7 +122,8 @@ final_output as (
         ) as daily_actual_revenue,
         amount * BR_cost_per / 365 as daily_BR_cost
     from ethena_payout
-) -- Final output with all calculated metrics
+)
+-- Final output with all metrics
 select
     dt,
     blockchain,
@@ -128,17 +131,13 @@ select
     token_symbol,
     reward_code,
     reward_per,
-    -- This is already APR (from Step 1)
     susde_apy,
-    -- Keep for reference
     susde_apr,
-    -- This is APR (converted)
     interest_code,
     interest_per,
-    -- This is APR difference (susde_apr - reward_per)
     actual_amount,
     amount,
     daily_actual_revenue,
-    daily_BR_cost -- Uses APR/365 (not APY/365)
+    daily_BR_cost
 from final_output
 order by dt desc;
