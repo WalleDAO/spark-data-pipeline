@@ -137,10 +137,8 @@ vault_data as (
         v.token_symbol,
         v.dt,
         v.supply_index,
-        v.performance_fee,
-        v.supply_amount,
-        v.supply_rate
-    from dune.steakhouse.result_morpho_vaults_data v
+        v.performance_fee
+    from query_5739088 v
     join sp_vault_addr va
         on v.blockchain = va.blockchain
         and v.vault_address = va.vault_addr
@@ -166,19 +164,17 @@ vault_balances as (
         v.supply_index,
         va.vault_utilization as util_rate,
         v.performance_fee,
-        v.supply_amount,
-        v.supply_rate as net_supply_rate,
-        va.vault_supply_rate as supply_rate_markets_allocated,
-        va.vault_borrow_rate as borrow_rate_markets_allocated,
+        va.vault_supply_amount as supply_amount,
+        va.vault_borrow_amount as borrow_amount,
+        va.vault_supply_rate as supply_rate,
+        va.vault_borrow_rate as borrow_rate,
+        va.vault_supply_amount - va.vault_borrow_amount as idle_amount,
         sum(coalesce(t.shares, 0)) over (
             partition by blockchain,
             vault_addr,
             user_addr
             order by dt asc
-        ) * v.supply_index as alm_supply_amount,
-        va.vault_supply_amount as supply_amount_markets_allocated,
-        va.vault_borrow_amount as borrow_amount_markets_allocated,
-        va.vault_supply_amount - va.vault_borrow_amount as idle_amount_markets_allocated
+        ) * v.supply_index as alm_supply_amount
     from seq s
     left join vault_data v
         using (blockchain, vault_addr, dt)
@@ -194,22 +190,19 @@ vault_balances_rates as (
         b.protocol_name,
         b.token_symbol,
         b.supply_amount,
+        b.borrow_amount,
         b.util_rate,
-        b.supply_amount *(1 - b.util_rate) as idle_amount,
-        b.net_supply_rate,
+        b.idle_amount,
         b.alm_supply_amount,
         (alm_supply_amount / supply_amount) as alm_share,
-        b.supply_amount *(1 - b.util_rate) * (alm_supply_amount / supply_amount) as alm_idle,
-        b.supply_amount_markets_allocated,
-        b.borrow_amount_markets_allocated,
-        b.idle_amount_markets_allocated,
-        b.supply_rate_markets_allocated,
-        b.borrow_rate_markets_allocated,
+        b.idle_amount * (alm_supply_amount / supply_amount) as alm_idle,
+        supply_rate,
+        borrow_rate,
         'NA' as reward_code,
         0 as reward_per,
         b.performance_fee,
         'APR-BR' as interest_code,
-        b.supply_rate_markets_allocated - i.reward_per as interest_per
+        b.supply_rate - i.reward_per as interest_per
     from vault_balances b
     cross join query_5353955 i -- Spark - Accessibility Rewards - Rates
     where
