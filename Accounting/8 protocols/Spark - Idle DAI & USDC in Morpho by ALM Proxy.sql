@@ -13,7 +13,7 @@ with sp_vault_addr (
             0x73e65dbd630f90604062f6e02fab9138e713edd9,
             date '2024-03-15'
         ),
-        -- Spark DAI Vault @ Ethereum
+        ---Spark DAI Vault @ Ethereum
         (
             'base',
             'vault',
