@@ -200,6 +200,8 @@ vault_balances_rates as (
         borrow_rate,
         i.reward_code,
         i.reward_per,
+        'APR-BR' as interest_code,
+        supply_rate-i.reward_per as interest_per,
         b.performance_fee
     from vault_balances b
     cross join query_5353955 i -- Spark - Accessibility Rewards - Rates
