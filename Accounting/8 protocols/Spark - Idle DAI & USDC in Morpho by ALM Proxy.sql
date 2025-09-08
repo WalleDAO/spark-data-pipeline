@@ -194,15 +194,13 @@ vault_balances_rates as (
         b.util_rate,
         b.idle_amount,
         b.alm_supply_amount,
-        (alm_supply_amount / supply_amount) as alm_share,
-        b.idle_amount * (alm_supply_amount / supply_amount) as alm_idle,
+        b.alm_supply_amount * b.util_rate as alm_borrow_amount,
+        b.alm_supply_amount - b.alm_supply_amount * b.util_rate as alm_idle,
         supply_rate,
         borrow_rate,
-        'NA' as reward_code,
-        0 as reward_per,
-        b.performance_fee,
-        'APR-BR' as interest_code,
-        b.supply_rate - i.reward_per as interest_per
+        i.reward_code,
+        i.reward_per,
+        b.performance_fee
     from vault_balances b
     cross join query_5353955 i -- Spark - Accessibility Rewards - Rates
     where
@@ -214,10 +212,17 @@ vault_balances_interest as (
     select
         *,
         case
-            when token_symbol = 'USDC'
-                then supply_amount * interest_per
-            else (supply_amount - idle_amount) * interest_per
-        end as net_rev_interest
+            when token_symbol in ('USDS', 'DAI')
+                then alm_borrow_amount * borrow_rate
+            when token_symbol in ('USDC')
+                then alm_supply_amount * supply_rate
+        end as interest_amount,
+        case
+            when token_symbol in ('USDS', 'DAI')
+                then alm_borrow_amount * reward_per
+            when token_symbol in ('USDC')
+                then alm_supply_amount * reward_per
+        end as BR_cost
     from vault_balances_rates
 )
 select
