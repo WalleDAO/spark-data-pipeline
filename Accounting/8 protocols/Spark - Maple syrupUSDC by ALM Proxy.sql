@@ -51,6 +51,52 @@ syrup_balance_cum as (
     left join syrup_balance
         using(dt)
 ),
+-- Track ALM's share changes in Maple SyrupUSDC pool
+syrup_shares as (
+    select 
+        evt_block_date as dt,
+        sum(
+            case 
+                when owner_ = (select alm_addr from addr) then cast(shares_ as double) / 1e6
+                else 0 
+            end
+        ) as deposit_shares,
+        0 as withdraw_shares
+    from maplefinance_v2_ethereum.pool_v2_evt_deposit
+    where contract_address = (select syrup_addr from addr)
+    group by 1
+    
+    union all
+    
+    select 
+        evt_block_date as dt,
+        0 as deposit_shares,
+        sum(
+            case 
+                when owner_ = (select alm_addr from addr) then cast(shares_ as double) / 1e6
+                else 0 
+            end
+        ) as withdraw_shares
+    from maplefinance_v2_ethereum.pool_v2_evt_withdraw
+    where contract_address = (select syrup_addr from addr)
+    group by 1
+),
+-- Daily net share changes for ALM
+syrup_shares_daily as (
+    select 
+        dt,
+        sum(deposit_shares) - sum(withdraw_shares) as net_shares_change
+    from syrup_shares
+    group by 1
+),
+-- Cumulative shares held by ALM
+syrup_shares_cum as (
+    select 
+        dt,
+        sum(coalesce(net_shares_change, 0)) over (order by dt) as total_shares
+    from seq
+    left join syrup_shares_daily using(dt)
+),
 syrup_indices as (
     select
         evt_block_date as dt,
@@ -84,7 +130,13 @@ syrup_indices as (
 syrup_gaps as (
     select
         dt,
+        -- Original amount: cumulative net USDC transfers (cost basis)
         b.amount,
+        -- Market value: ALM shares multiplied by current supply index
+        coalesce(
+            s.total_shares * last_value(i.supply_index) ignore nulls over (order by dt),
+            0
+        ) as market_value,
         last_value(i.assets) ignore nulls over (
             order by dt
         ) as assets,
@@ -94,16 +146,19 @@ syrup_gaps as (
         last_value(i.supply_index) ignore nulls over (
             order by dt
         ) as supply_index
-    from seq s
+    from seq
     left join syrup_indices i
         using (dt)
     left join syrup_balance_cum b
+        using (dt)
+    left join syrup_shares_cum s
         using (dt)
 ),
 syrup_apy as (
     select
         dt,
         amount,
+        market_value,
         (
             supply_index / lag(supply_index, 7) over (
                 order by dt asc
@@ -128,6 +183,7 @@ syrup_rates as (
         'Maple' as protocol_name,
         'USDC' as token_symbol,
         amount,
+        market_value,
         'NA' as reward_code,
         0 as reward_per,
         'APR-BR' as interest_code,
