@@ -24,7 +24,7 @@ syrup_balance as (
         t.evt_block_date as dt,
         sum(
             if(t."to" = a.syrup_addr, t."value", - t."value")
-        ) / 1e6 as amount
+        ) / 1e6 as net_transfer
     from circle_ethereum.USDC_evt_Transfer t
     cross join addr a
     where
@@ -44,9 +44,9 @@ syrup_balance as (
 syrup_balance_cum as (
     select
         dt,
-        sum(coalesce(amount, 0)) over (
+        sum(coalesce(net_transfer, 0)) over (
             order by dt asc
-        ) as amount
+        ) as principal
     from seq
     left join syrup_balance
         using(dt)
@@ -130,13 +130,13 @@ syrup_indices as (
 syrup_gaps as (
     select
         dt,
-        -- Original amount: cumulative net USDC transfers (cost basis)
-        b.amount,
-        -- Market value: ALM shares multiplied by current supply index
+        -- Principal: cumulative net USDC transfers (cost basis)
+        b.principal,
+        -- Amount: ALM shares multiplied by current supply index (current position value)
         coalesce(
             s.total_shares * last_value(i.supply_index) ignore nulls over (order by dt),
             0
-        ) as market_value,
+        ) as amount,
         last_value(i.assets) ignore nulls over (
             order by dt
         ) as assets,
@@ -157,8 +157,8 @@ syrup_gaps as (
 syrup_apy as (
     select
         dt,
+        principal,
         amount,
-        market_value,
         (
             supply_index / lag(supply_index, 7) over (
                 order by dt asc
@@ -183,7 +183,7 @@ syrup_rates as (
         'Maple' as protocol_name,
         'USDC' as token_symbol,
         amount,
-        market_value,
+        principal,
         'NA' as reward_code,
         0 as reward_per,
         'APR-BR' as interest_code,
