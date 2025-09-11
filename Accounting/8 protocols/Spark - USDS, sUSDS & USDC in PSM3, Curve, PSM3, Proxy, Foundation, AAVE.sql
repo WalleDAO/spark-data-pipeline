@@ -1,18 +1,4 @@
-/*
--- @title: Spark - USDS, sUSDS & USDC in PSM3, Curve, PSM3, Proxy, Foundation, and AAVE
--- @description: Retrieves token balances for a number of target protocols (Curve, AAVE) or 
-                 addresses (PSM3, ALM Proxy, Spark Foundation)
--- @notes: Assumptions:
-    1. All USDC, USDS & sUSDS balances in PSM3 belong to the ALM Proxy
-    2. All USDT balance in Curve USDT belongs to the ALM Proxy
--- @version:
-    - 1.0 - 2025-07-11 - Initial version [SJS]
-    - 1.1 - 2025-07-25 - Spark Treasury moved to User-level tracking
-    - 1.2 - 2025-07-26 - Maple syrupUSDC moved to dedicated query
-*/
-
 with
-    -- Token targets
     token_targets (blockchain, token_symbol, token_addr, decimals, start_date) as (
         values
             -- sUSDS
@@ -35,35 +21,26 @@ with
             ('unichain', 'USDC', 0x078D782b760474a361dDA0AF3839290b0EF57AD6, 6, date '2024-11-05'),
             -- USDT
             ('ethereum', 'USDT', 0xdAC17F958D2ee523a2206206994597C13D831ec7, 6, date '2017-11-28')
-            -- DAI
-            --('ethereum', 'DAI', 0x6B175474E89094C44Da98b954EedeAC495271d0F, 18, date '2019-11-13')
     ),
     -- Protocol targets
     spark_targets (code, reward_code, interest_code, blockchain, protocol_name, protocol_addr, start_date) as (
         values
-        -- PSM3
-            -- before: (1, '?', 'BR', 'base', 'PSM3', 0x1601843c5E9bC251A3272907010AFa41Fa18347E, date '2024-10-23'),
+            -- PSM3
             (1, 'BR', 'BR', 'base', 'PSM3', 0x1601843c5E9bC251A3272907010AFa41Fa18347E, date '2024-10-23'),
             (1, 'BR', 'BR', 'arbitrum', 'PSM3', 0x2B05F8e1cACC6974fD79A673a341Fe1f58d27266, date '2025-02-03'),
             (1, 'BR', 'BR', 'optimism', 'PSM3', 0xe0F9978b907853F354d79188A3dEfbD41978af62, date '2025-05-07'),
             (1, 'BR', 'BR', 'unichain', 'PSM3', 0x7b42Ed932f26509465F7cE3FAF76FfCe1275312f, date '2025-05-13'),
-        -- ALM Proxy
-            --(2, 'BR', 'BR', 'ethereum', 'ALM Proxy', 0x1601843c5E9bC251A3272907010AFa41Fa18347E, date '2024-10-23'),
+            -- ALM Proxy
+            (2, 'BR', 'BR', 'ethereum', 'ALM Proxy', 0x1601843c5E9bC251A3272907010AFa41Fa18347E, date '2024-10-23'),
             (2, 'BR', 'BR', 'base', 'ALM Proxy', 0x2917956eFF0B5eaF030abDB4EF4296DF775009cA, date '2024-10-23'),
             (2, 'BR', 'BR', 'arbitrum', 'ALM Proxy', 0x92afd6F2385a90e44da3a8B60fe36f6cBe1D8709, date '2025-02-24'),
             (2, 'BR', 'BR', 'optimism', 'ALM Proxy', 0x876664f0c9Ff24D1aa355Ce9f1680AE1A5bf36fB, date '2025-05-07'),
             (2, 'BR', 'BR', 'unichain', 'ALM Proxy', 0x345E368fcCd62266B3f5F37C9a131FD1c39f5869, date '2025-05-15'),
-        -- Spark Proxy (Treasury)
-            -- Moved to User-level tracking with code 12
-            --(3, 'AR', 'BR', 'ethereum', 'Treasury', 0x3300f198988e4C9C63F75dF86De36421f06af8c4, date '2023-05-26'),
-        -- Spark Foundation Multisig
+            -- Spark Foundation Multisig
             (4, 'AR', 'BR', 'ethereum', 'Foundation', 0x92e4629a4510AF5819d7D1601464C233599fF5ec, date '2025-04-07'),
-        -- Maple syrupUSDC
-            --(5, 'XR', 'APY', 'ethereum', 'Maple', 0x859C9980931fa0A63765fD8EF2e29918Af5b038C, date '2025-03-19'),
-            --(5, 'XR', 'APY', 'ethereum', 'Maple', 0x80ac24aA929eaF5013f6436cdA2a7ba190f5Cc0b, date '2024-05-24'),
-        -- Curve USDT
+            -- Curve USDT
             (6, 'BR', 'BR', 'ethereum', 'Curve', 0x00836Fe54625BE242BcFA286207795405ca4fD10, date '2025-04-07'),
-        -- AAVE aEthUSDS
+            -- AAVE aEthUSDS
             (7, 'AR', 'BR', 'ethereum', 'AAVE aETHUSDS', 0x32a6268f9Ba3642Dda7892aDd74f1D34469A4259, date '2024-10-02')
     ),
     protocol_balances as (
@@ -82,7 +59,7 @@ with
             and tr."to" = st.protocol_addr
         where date(tr.block_date) >= tt.start_date
           and tt.token_symbol in ('sUSDS', 'USDS', 'USDC', 'USDT')
-          and st.code in (1, 2, 3, 4, 5, 6, 7)
+          and st.code in (1, 2, 4, 6, 7)
         union all
         select
             tr.blockchain,
@@ -99,7 +76,7 @@ with
             and tr."from" = st.protocol_addr
         where date(tr.block_date) >= tt.start_date
           and tt.token_symbol in ('sUSDS', 'USDS', 'USDC', 'USDT')
-          and st.code in (1, 2, 3, 4, 5, 6, 7)
+          and st.code in (1, 2, 4, 6, 7)
     ),
     totals_check as (
         select blockchain, token_addr, protocol_addr, sum(amount) as amount from protocol_balances group by 1,2,3
@@ -136,7 +113,6 @@ with
         join spark_targets st using (blockchain, protocol_addr)
         left join protocol_balances_sum b using (blockchain, protocol_addr, token_addr, dt)
     ),
-    -- exclude tokens not held in the protocols and turn very smol amounts to 0
     protocol_balances_cum_filter as (
         select
             b.dt,
@@ -144,10 +120,9 @@ with
             st.code,
             case
                 when st.reward_code != '?' then st.reward_code
-                -- Not applicable anymore, but left here just in case
-                when b.token_symbol = 'USDS' then 'AR'  -- PSM3 for USDS balances  : AR
-                when b.token_symbol = 'sUSDS' then 'XR' -- PSM3 for sUSDS balances : XR
-                when b.token_symbol = 'USDC' then 'BR'  -- PSM3 for USDC balances  : BR
+                when b.token_symbol = 'USDS' then 'AR'
+                when b.token_symbol = 'sUSDS' then 'XR'
+                when b.token_symbol = 'USDC' then 'BR'
             end as reward_code,
             st.interest_code,
             st.protocol_name,
@@ -155,13 +130,11 @@ with
             if(b.amount > 1e-6, b.amount, 0) as amount
         from protocol_balances_cum b
         join spark_targets st using (blockchain, protocol_addr)
-        where (st.code = 1 and b.token_symbol in ('sUSDS', 'USDS', 'USDC')) -- PSM3
-           or (st.code = 2 and b.token_symbol in ('sUSDS', 'USDS', 'USDC')) -- ALM Proxy
-           --or (st.code = 3 and b.token_symbol = 'USDS') -- Spark Proxy (Treasury)
-           or (st.code = 4 and b.token_symbol = 'USDS') -- Spark Foundation (multisig)
-           --or (st.code = 5 and b.token_symbol = 'USDC') -- Maple syrupUSDC
-           or (st.code = 6 and b.token_symbol = 'USDT') -- Curve USDT
-           or (st.code = 7 and b.token_symbol = 'USDS') -- AAVE aEthUSDS
+        where (st.code = 1 and b.token_symbol in ('sUSDS', 'USDS', 'USDC'))
+           or (st.code = 2 and b.token_symbol in ('sUSDS', 'USDS', 'USDC', 'USDT'))
+           or (st.code = 4 and b.token_symbol = 'USDS')
+           or (st.code = 6 and b.token_symbol = 'USDT')
+           or (st.code = 7 and b.token_symbol = 'USDS')
     ),
     protocol_rates as (
         select
@@ -173,23 +146,14 @@ with
             r.reward_per,
             b.interest_code,
             -i.reward_per as interest_per,
-            /*
-            if(
-                b.interest_code = 'APY',
-                m.apy_90d,
-                -i.reward_per
-            ) as interest_per,
-            */
             b.amount
         from protocol_balances_cum_filter b
-        left join query_5353955 r -- Spark - Accessibility Rewards - Rates => reward percentage
+        left join query_5353955 r
             on b.reward_code = r.reward_code
             and b.dt between r.start_dt and r.end_dt
-        left join query_5353955 i -- Spark - Accessibility Rewards - Rates => interest percentage
+        left join query_5353955 i
             on b.interest_code = i.reward_code
             and b.dt between i.start_dt and i.end_dt
-        --left join query_5498653 m -- Spark - Maple SyrupUSDC APY
-        --    on b.dt = m.dt
     )
 
 select *
