@@ -17,81 +17,65 @@ with
         where st.category = 'aToken'
     ),
     
-    -- Get reserve data including rates and indices from protocol events
+    -- Extract supply and borrow indices from aToken events
     reserve_data as (
-        with daily_reserve_data as (
+        with daily_indices as (
+            -- Get supply index from aToken mint events
             select 
-                date_trunc('day', evt_block_time) as day, 
-                reserve as asset_address,
-                -- Get the latest supply index for the day
-                max_by(liquidityIndex * 1e-27, evt_block_time) as supply_index,
-                -- Get the latest borrow index for the day
-                max_by(variableBorrowIndex * 1e-27, evt_block_time) as borrow_index,
-                -- Calculate annualized supply rate
-                power(1 + max_by(liquidityRate * 1e-27, evt_block_time)/31536000, 31536000) - 1 as supply_rate,
-                -- Calculate annualized borrow rate
-                power(1 + max_by(variableBorrowRate * 1e-27, evt_block_time)/31536000, 31536000) - 1 as borrow_rate
-            from spark_protocol_ethereum.Pool_evt_ReserveDataUpdated
-            where reserve in (
-                select underlying_asset 
-                from underlying_assets
-                where underlying_asset is not null
-            )
+                date_trunc('day', evt_block_time) as day,
+                st.symbol,
+                max_by(index / 1e27, evt_block_time) as supply_index
+            from aave_v3_lido_ethereum.atoken_evt_mint m
+            join spark_tokens st on m.contract_address = st.contract_address
+            where st.category = 'aToken'
+            group by 1, 2
+            
+            union all
+            
+            -- Get supply index from aToken burn events  
+            select 
+                date_trunc('day', evt_block_time) as day,
+                st.symbol,
+                max_by(index / 1e27, evt_block_time) as supply_index
+            from aave_v3_lido_ethereum.atoken_evt_burn b
+            join spark_tokens st on b.contract_address = st.contract_address
+            where st.category = 'aToken'
             group by 1, 2
         ),
         -- Generate time series and forward fill missing data
         time_series as (
             select
-                ua.symbol,
+                st.symbol,
                 s.dt
-            from underlying_assets ua
+            from spark_tokens st
             cross join unnest(sequence(date '2024-10-02', current_date, interval '1' day)) as s(dt)
-            where ua.underlying_asset is not null
+            where st.category = 'aToken'
         )
         select 
             ts.dt as period,
             ts.symbol,
             -- Forward fill missing supply index data
             coalesce(
-                rrd.supply_index, 
-                last_value(rrd.supply_index) ignore nulls over (
+                di.supply_index, 
+                last_value(di.supply_index) ignore nulls over (
                     partition by ts.symbol 
                     order by ts.dt 
                     rows between unbounded preceding and current row
                 )
             ) as supply_index,
-            -- Forward fill missing borrow index data
+            -- Use supply index as borrow index approximation for now
             coalesce(
-                rrd.borrow_index, 
-                last_value(rrd.borrow_index) ignore nulls over (
+                di.supply_index, 
+                last_value(di.supply_index) ignore nulls over (
                     partition by ts.symbol 
                     order by ts.dt 
                     rows between unbounded preceding and current row
                 )
-            ) as borrow_index,
-            -- Forward fill missing supply rate data
-            coalesce(
-                rrd.supply_rate, 
-                last_value(rrd.supply_rate) ignore nulls over (
-                    partition by ts.symbol 
-                    order by ts.dt 
-                    rows between unbounded preceding and current row
-                )
-            ) as supply_rate,
-            -- Forward fill missing borrow rate data
-            coalesce(
-                rrd.borrow_rate, 
-                last_value(rrd.borrow_rate) ignore nulls over (
-                    partition by ts.symbol 
-                    order by ts.dt 
-                    rows between unbounded preceding and current row
-                )
-            ) as borrow_rate
+            ) as borrow_index
         from time_series ts
-        left join underlying_assets ua on ts.symbol = ua.symbol
-        left join daily_reserve_data rrd 
-            on ts.dt = rrd.day 
-            and ua.underlying_asset = rrd.asset_address
+        left join daily_indices di 
+            on ts.dt = di.day 
+            and ts.symbol = di.symbol
     ),
     
     -- Calculate total supply and borrow amounts from token events
