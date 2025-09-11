@@ -192,7 +192,7 @@ syrup_rates as (
         apr_30d,
         apr_90d
     from syrup_apy
-    cross join query_5353955 i -- Spark - Accessibility Rewards - Rates: interest (already APR)
+    cross join query_5353955 i -- Spark - Accessibility Rewards 
     where
         i.reward_code = 'BR'
         and dt between i.start_dt
