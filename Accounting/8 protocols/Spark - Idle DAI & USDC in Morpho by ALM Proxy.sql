@@ -1,35 +1,11 @@
-with sp_vault_addr (
-    blockchain,
-    category,
-    symbol,
-    vault_addr,
-    start_date
-) as (
-    values
-        (
-            'ethereum',
-            'vault',
-            'spDAI',
-            0x73e65dbd630f90604062f6e02fab9138e713edd9,
-            date '2024-03-15'
-        ),
-        ---Spark DAI Vault @ Ethereum
-        (
-            'base',
-            'vault',
-            'spUSDC',
-            0x7BfA7C4f149E7415b73bdeDfe609237e29CBF34A,
-            date '2024-12-30'
-        ),
-        -- Spark USDC Vault @ Base
-        (
-            'ethereum',
-            'vault',
-            'spUSDS',
-            0xe41a0583334f0dc4e023acd0bfef3667f6fe0597,
-            date '2025-07-16'
-        ) -- Spark USDS Vault @ Ethereum
-),
+with 
+    sp_vault_addr (blockchain, category, symbol, vault_addr, start_date) as (
+        values
+            ('ethereum', 'vault', 'spDAI', 0x73e65dbd630f90604062f6e02fab9138e713edd9, date '2024-03-15'),
+            ('base', 'vault', 'spUSDC', 0x7BfA7C4f149E7415b73bdeDfe609237e29CBF34A, date '2024-12-30'),
+            ('ethereum', 'vault', 'spUSDS', 0xe41a0583334f0dc4e023acd0bfef3667f6fe0597, date '2025-07-16'),
+            ('ethereum', 'vault', 'spUSDC', 0x56A76b428244a50513ec81e225a293d128fd581D, date '2025-09-08')
+    ),
 sp_alm_addr (
     blockchain,
     category,
@@ -204,7 +180,7 @@ vault_balances_rates as (
         supply_rate-i.reward_per as interest_per,
         b.performance_fee
     from vault_balances b
-    cross join query_5353955 i -- Spark - Accessibility Rewards - Rates
+    cross join query_5353955 i 
     where
         i.reward_code = 'BR'
         and b.dt between i.start_dt
