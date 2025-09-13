@@ -66,6 +66,7 @@ vault_transfers_sum as (
     join sp_alm_addr u
         on s.chain = u.blockchain
         and s.owner = u.alm_addr
+    where s.shares > 1 and s.assets > 1
     group by 1, 2, 3, 4
 ),
 seq as (
@@ -94,7 +95,8 @@ vault_data as (
         v.token_symbol,
         v.dt,
         v.supply_index,
-        v.performance_fee
+        v.performance_fee,
+        v.vault_supply_amount
     from query_5739088 v
     join sp_vault_addr va
         on v.blockchain = va.blockchain
@@ -105,8 +107,6 @@ vault_data_part2 as (
         dt,
         vault_address as vault_addr,
         blockchain,
-        vault_supply_amount,
-        vault_borrow_amount,
         vault_utilization,
         vault_supply_rate,
         vault_borrow_rate
@@ -121,11 +121,11 @@ vault_balances as (
         v.supply_index,
         va.vault_utilization as util_rate,
         v.performance_fee,
-        va.vault_supply_amount as supply_amount,
-        va.vault_borrow_amount as borrow_amount,
+        v.vault_supply_amount as supply_amount,
+        v.vault_supply_amount*va.vault_utilization as borrow_amount,
         va.vault_supply_rate as supply_rate,
         va.vault_borrow_rate as borrow_rate,
-        va.vault_supply_amount - va.vault_borrow_amount as idle_amount,
+        v.vault_supply_amount - v.vault_supply_amount*va.vault_utilization as idle_amount,
         sum(coalesce(t.shares, 0)) over (
             partition by blockchain,
             vault_addr,
