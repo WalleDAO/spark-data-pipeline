@@ -6,6 +6,44 @@
 */
 
 with
+    -- Define specific Spark vaults to analyze
+    sp_vault_addr (blockchain, category, symbol, vault_addr, start_date) as (
+        values
+            ('ethereum', 'vault', 'spDAI', 0x73e65dbd630f90604062f6e02fab9138e713edd9, date '2024-03-15'),
+            ('base', 'vault', 'spUSDC', 0x7BfA7C4f149E7415b73bdeDfe609237e29CBF34A, date '2024-12-30'),
+            ('ethereum', 'vault', 'spUSDS', 0xe41a0583334f0dc4e023acd0bfef3667f6fe0597, date '2025-07-16'),
+            ('ethereum', 'vault', 'spUSDC', 0x56A76b428244a50513ec81e225a293d128fd581D, date '2025-09-08')
+    ),
+
+    -- Get vault addresses for filtering
+    spark_vaults as (
+        select
+            blockchain,
+            vault_addr as vault_address,
+            symbol
+        from sp_vault_addr
+    ),
+
+    -- Get markets that Spark vaults interact with
+    spark_markets as (
+        SELECT DISTINCT
+            supply.id as market_id,
+            supply.chain as blockchain
+        FROM morpho_blue_multichain.morphoblue_evt_supply as supply
+        JOIN spark_vaults
+            on supply.onBehalf = spark_vaults.vault_address
+            and supply.chain = spark_vaults.blockchain
+        UNION
+        SELECT DISTINCT
+            withdraw.id as market_id,
+            withdraw.chain as blockchain
+        FROM morpho_blue_multichain.morphoblue_evt_withdraw as withdraw
+        JOIN spark_vaults
+            on withdraw.onBehalf = spark_vaults.vault_address
+            and withdraw.chain = spark_vaults.blockchain
+    ),
+
+    -- Extract basic market information from creation events (filtered for Spark markets)
     raw_markets as (
         select
             c.evt_block_time as creation_ts,
@@ -15,6 +53,9 @@ with
             from_hex(lpad(json_query(c.marketParams, 'lax $.loanToken' omit quotes), 42, '0')) as loan_address,
             from_hex(lpad(json_query(c.marketParams, 'lax $.collateralToken' omit quotes), 42, '0')) as coll_address
         from morpho_blue_multichain.morphoblue_evt_createmarket c
+        JOIN spark_markets sm 
+            ON c.id = sm.market_id 
+            AND c.chain = sm.blockchain
     ),
     
     -- Add loan token decimals information
@@ -56,7 +97,7 @@ with
         cross join unnest(sequence(m.creation_dt, current_date, interval '1' day)) as t(dt)
     ),
 
-    -- Extract and normalize supply events (supply + withdraw)
+    -- Extract and normalize supply events (supply + withdraw) - filtered for Spark markets
     supply_events as (
         -- SUPPLY events add liquidity to market 
         select 
@@ -83,7 +124,7 @@ with
             and w.chain = m.blockchain
     ),
 
-    -- Extract and normalize borrow events (borrow + repay + liquidate)
+    -- Extract and normalize borrow events (borrow + repay + liquidate) - filtered for Spark markets
     borrow_events as (
         -- BORROW events increase borrower liability 
         select 
@@ -379,7 +420,7 @@ with
             on m.dt = s.dt and m.market_id = s.market_id and m.blockchain = s.blockchain
     )
 
--- Final output with 8 essential fields
+-- Final output with original 8 fields
 select 
     dt,
     blockchain,
