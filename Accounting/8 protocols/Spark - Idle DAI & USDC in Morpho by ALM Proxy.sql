@@ -30,61 +30,44 @@ sp_alm_addr (
             date '2024-10-23'
         ) -- ALM Proxy @ Base
 ),
--- get all shares transfers from morpho vault spDAI
+-- 🔄 修改：从 deposit/withdraw 事件获取 shares 变化
+supply_events as (
+    select evt_block_time, chain, contract_address, shares, assets, owner, 'deposit' as side
+    from metamorpho_vaults_multichain.metamorpho_evt_deposit
+    where contract_address in (select vault_addr from sp_vault_addr)
+    union all
+    select evt_block_time, chain, contract_address, shares, assets, owner, 'deposit' as side
+    from metamorpho_vaults_multichain.metamorphov1_1_evt_deposit
+    where contract_address in (select vault_addr from sp_vault_addr)
+    union all
+    select evt_block_time, chain, contract_address, shares, assets, owner, 'withdraw' as side
+    from metamorpho_vaults_multichain.metamorpho_evt_withdraw
+    where contract_address in (select vault_addr from sp_vault_addr)
+    union all
+    select evt_block_time, chain, contract_address, shares, assets, owner, 'withdraw' as side
+    from metamorpho_vaults_multichain.metamorphov1_1_evt_withdraw
+    where contract_address in (select vault_addr from sp_vault_addr)
+),
+-- 🔄 修改：基于 deposit/withdraw 事件计算每日 shares 变化
 vault_transfers_sum as (
     select
-        t.chain as blockchain,
-        t.evt_block_date as dt,
-        t.contract_address as vault_addr,
-        t.owner as user_addr,
-        sum(t."value" / 1e18) as shares
-    from (
-            select
-                chain,
-                evt_block_date,
-                contract_address,
-                "to" as owner,
-                "value"
-            from metamorpho_vaults_multichain.metamorpho_evt_transfer
-            where
-                "to" <> 0x0000000000000000000000000000000000000000
-            union all
-            select
-                chain,
-                evt_block_date,
-                contract_address,
-                "to" as owner,
-                "value"
-            from metamorpho_vaults_multichain.metamorphov1_1_evt_transfer
-            where
-                "to" <> 0x0000000000000000000000000000000000000000
-            union all
-            select
-                chain,
-                evt_block_date,
-                contract_address,
-                "from" as owner,
-                - "value"
-            from metamorpho_vaults_multichain.metamorpho_evt_transfer
-            where
-                "from" <> 0x0000000000000000000000000000000000000000
-            union all
-            select
-                chain,
-                evt_block_date,
-                contract_address,
-                "from" as owner,
-                - "value"
-            from metamorpho_vaults_multichain.metamorphov1_1_evt_transfer
-            where
-                "from" <> 0x0000000000000000000000000000000000000000
-        ) t
+        s.chain as blockchain,
+        date(s.evt_block_time) as dt,
+        s.contract_address as vault_addr,
+        s.owner as user_addr,
+        sum(
+            case 
+                when s.side = 'deposit' then s.shares / 1e18
+                when s.side = 'withdraw' then -(s.shares / 1e18)
+            end
+        ) as shares
+    from supply_events s
     join sp_vault_addr v
-        on t.chain = v.blockchain
-        and t.contract_address = v.vault_addr
+        on s.chain = v.blockchain
+        and s.contract_address = v.vault_addr
     join sp_alm_addr u
-        on t.chain = u.blockchain
-        and t.owner = u.alm_addr
+        on s.chain = u.blockchain
+        and s.owner = u.alm_addr
     group by 1, 2, 3, 4
 ),
 seq as (
