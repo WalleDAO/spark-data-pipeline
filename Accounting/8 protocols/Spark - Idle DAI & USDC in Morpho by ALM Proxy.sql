@@ -30,7 +30,6 @@ sp_alm_addr (
             date '2024-10-23'
         ) -- ALM Proxy @ Base
 ),
--- 🔄 修改：从 deposit/withdraw 事件获取 shares 变化
 supply_events as (
     select evt_block_time, chain, contract_address, shares, assets, owner, 'deposit' as side
     from metamorpho_vaults_multichain.metamorpho_evt_deposit
@@ -48,7 +47,6 @@ supply_events as (
     from metamorpho_vaults_multichain.metamorphov1_1_evt_withdraw
     where contract_address in (select vault_addr from sp_vault_addr)
 ),
--- 🔄 修改：基于 deposit/withdraw 事件计算每日 shares 变化
 vault_transfers_sum as (
     select
         s.chain as blockchain,
