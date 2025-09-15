@@ -81,7 +81,7 @@ syrup_shares as (
     where contract_address = (select syrup_addr from addr)
     group by 1
 ),
--- Daily net share changes for ALM
+
 syrup_shares_daily as (
     select 
         dt,
