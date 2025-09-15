@@ -165,7 +165,7 @@ susde as (
                 shares
             from ethena_labs_ethereum.stakedusdev2_evt_deposit
             where
-                shares > 1e10
+                shares > 1
             union all
             select
                 evt_block_time as dt,
@@ -173,7 +173,7 @@ susde as (
                 shares
             from ethena_labs_ethereum.stakedusdev2_evt_withdraw
             where
-                shares > 1e10
+                shares > 1
         )
     group by 1
 ),
