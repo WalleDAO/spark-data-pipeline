@@ -1,5 +1,4 @@
 with
-    -- Dynamically retrieve Spark tokens
     spark_tokens as (
         select 
             'ethereum' as blockchain,
@@ -34,7 +33,7 @@ with
         select * from spark_tokens
     ),
     
-    -- Reserve factor configuration for different tokens
+    -- Reserve factor configuration
     sparklend_reserve_factor as (
         with latest_reserve_factors as (
             select 
@@ -78,7 +77,7 @@ with
             
             union all
             
-            -- aToken burn events (supply decreases)
+            -- aToken burn events 
             select
                 t.evt_block_date as dt,
                 st.category,
