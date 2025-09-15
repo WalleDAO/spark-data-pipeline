@@ -1,16 +1,3 @@
-/*
--- @title: Spark - Pendle Farms
--- @description: Retrieves USDS balance from Pendle pools: USDS-14AUG2025 and USDS-SPK
--- @dev: for Pendle USDS points (USDS-14AUG2025), since Spark offers leverage on it via
---       the Morpho DAI vault against PT-USDS, we need to deduct off 40bps. Given it expires
---       in Aug'25, we set the value to 0.2%
--- @version:
-    - 1.0 - 2025-07-17 - Initial version [SJS]
-    - 1.1 - 2025-07-28 - Setting 0.2% to pool USDS-14AUG2025
-    - 1.2 - 2025-09-02 - Updated to use APR rates from query_5353955 [APY→APR conversion]
-    - 1.3 - 2025-09-10 - Modified to use erc20_ethereum.evt_Transfer (Trino compatible)
-*/
-
 with
     tokens (blockchain, contract_address, "type", symbol, decimals, start_date) as (
         values
