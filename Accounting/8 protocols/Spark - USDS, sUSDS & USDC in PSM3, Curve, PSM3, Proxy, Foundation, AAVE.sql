@@ -133,7 +133,7 @@ with
         where (st.code = 1 and b.token_symbol in ('sUSDS', 'USDS', 'USDC'))
            or (st.code = 2 and b.token_symbol in ('sUSDS', 'USDS', 'USDC', 'USDT'))
            or (st.code = 4 and b.token_symbol = 'USDS')
-           or (st.code = 6 and b.token_symbol = 'USDT')
+           or (st.code = 6 and b.token_symbol in ('USDT','sUSDS'))
            or (st.code = 7 and b.token_symbol = 'USDS')
     ),
     protocol_rates as (
