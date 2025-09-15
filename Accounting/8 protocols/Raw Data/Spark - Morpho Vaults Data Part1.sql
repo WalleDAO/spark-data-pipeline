@@ -129,6 +129,40 @@ with
         where d.shares > 1 and d.assets > 1
     ),
     
+    daily_share_prices as (
+        select
+            dt,
+            blockchain,
+            vault_address,
+            max_by(supply_amount/supply_shares, ts) as daily_share_price,
+            sum(supply_shares) as daily_shares_change,
+            sum(supply_amount) as daily_amount_change
+        from vault_supply
+        where supply_shares > 0  
+        group by 1, 2, 3
+    ),
+    
+    share_price_daily as (
+        select
+            vs.dt,
+            vs.blockchain,
+            vs.vault_address,
+            coalesce(
+                dsp.daily_share_price,
+                last_value(dsp.daily_share_price) ignore nulls over (
+                    partition by vs.blockchain, vs.vault_address
+                    order by vs.dt
+                    rows between unbounded preceding and current row
+                ),
+                1.0  
+            ) as share_price
+        from vault_series vs
+        left join daily_share_prices dsp
+            on vs.dt = dsp.dt
+            and vs.blockchain = dsp.blockchain
+            and vs.vault_address = dsp.vault_address
+    ),
+    
     -- Daily vault supply amount calculation
     vault_supply_daily as (
         select
@@ -139,60 +173,6 @@ with
             sum(supply_amount) as daily_amount_change
         from vault_supply
         group by 1, 2, 3
-    ),
-    
-    -- Share pricing with interpolation 
-    shares_pricing as (
-        SELECT ts, 'event' as row_type, blockchain, vault_address,
-            max(round(supply_amount/supply_shares, 15)) as share_price,
-            max(to_unixtime(ts)) as share_unix_ts
-        FROM vault_supply
-        GROUP BY 1, 3, 4
-        UNION ALL
-        SELECT creation_ts, 'event' as row_type, blockchain, vault_address,
-            1.0 as share_price, to_unixtime(creation_ts) as share_unix_ts
-        FROM vault_data
-        UNION ALL
-        SELECT dt, 'date' as row_type, blockchain, vault_address,
-            NULL as share_price, NULL as share_unix_ts
-        FROM vault_series
-    ),
-    
-    -- Events with periods 
-    events_with_periods as (
-        SELECT ts, to_unixtime(ts) as unix_ts, vault_address, blockchain, row_type,
-            FIRST_VALUE(share_price) IGNORE NULLS OVER (PARTITION BY vault_address, blockchain ORDER BY TS DESC ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING) as previous_price,
-            NTH_VALUE(share_price, 2) IGNORE NULLS OVER (PARTITION BY vault_address, blockchain ORDER BY TS DESC ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING) as previous_previous_price,
-            FIRST_VALUE(share_price) IGNORE NULLS OVER (PARTITION BY vault_address, blockchain ORDER BY TS ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING) as next_price,
-            NTH_VALUE(share_price, 2) IGNORE NULLS OVER (PARTITION BY vault_address, blockchain ORDER BY TS ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING) as next_next_price,
-            FIRST_VALUE(share_unix_ts) IGNORE NULLS OVER (PARTITION BY vault_address, blockchain ORDER BY TS DESC ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING) as previous_ts,
-            NTH_VALUE(share_unix_ts, 2) IGNORE NULLS OVER (PARTITION BY vault_address, blockchain ORDER BY TS DESC ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING) as previous_previous_ts,
-            FIRST_VALUE(share_unix_ts) IGNORE NULLS OVER (PARTITION BY vault_address, blockchain ORDER BY TS ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING) as next_ts,
-            NTH_VALUE(share_unix_ts, 2) IGNORE NULLS OVER (PARTITION BY vault_address, blockchain ORDER BY TS ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING) as next_next_ts 
-        FROM shares_pricing
-    ),
-    
-    -- Share pricing series with interpolation 
-    shares_pricing_series as (
-        SELECT ts, vault_address, blockchain, row_type,
-            CASE 
-                WHEN previous_price IS NOT NULL AND next_price IS NOT NULL
-                    THEN previous_price + (next_price - previous_price)/(next_ts - previous_ts) * (unix_ts - previous_ts)
-                WHEN next_price IS NOT NULL AND next_next_price IS NOT NULL
-                    THEN GREATEST(1, next_price - (next_next_price - next_price)/(next_next_ts - next_ts) * (next_next_ts - unix_ts))
-                WHEN previous_price IS NOT NULL AND previous_previous_price IS NOT NULL
-                    THEN previous_price + (previous_price - previous_previous_price)/(previous_ts - previous_previous_ts) * (unix_ts - previous_previous_ts)
-                ELSE COALESCE(previous_price, next_price)
-            END as share_price
-        from events_with_periods
-    ),
-    
-    -- Daily share prices
-    share_price_daily as (
-        select ts as dt, blockchain, vault_address, share_price,
-            LAG(share_price) IGNORE NULLS OVER (PARTITION BY blockchain, vault_address ORDER BY ts) as previous_share_price
-        from shares_pricing_series
-        WHERE row_type = 'date'
     ),
     
     -- Get performance fees (filtered)
@@ -243,20 +223,21 @@ SELECT
     spd.blockchain,
     spd.vault_address,
     case when spd.vault_address=0x56a76b428244a50513ec81e225a293d128fd581d then 
-    coalesce(
-        last_value(vpf.performance_fee) ignore nulls over (
-            partition by spd.blockchain, spd.vault_address 
-            order by spd.dt 
-            rows between unbounded preceding and current row
-        ), 0.01
-    ) else 
-    coalesce(
-        last_value(vpf.performance_fee) ignore nulls over (
-            partition by spd.blockchain, spd.vault_address 
-            order by spd.dt 
-            rows between unbounded preceding and current row
-        ), 0
-    ) end as performance_fee,
+        coalesce(
+            last_value(vpf.performance_fee) ignore nulls over (
+                partition by spd.blockchain, spd.vault_address 
+                order by spd.dt 
+                rows between unbounded preceding and current row
+            ), 0.01
+        ) else 
+        coalesce(
+            last_value(vpf.performance_fee) ignore nulls over (
+                partition by spd.blockchain, spd.vault_address 
+                order by spd.dt 
+                rows between unbounded preceding and current row
+            ), 0
+        ) 
+    end as performance_fee,
     vd.token_symbol,
     spd.share_price as supply_index,
     vd.vault_symbol,
