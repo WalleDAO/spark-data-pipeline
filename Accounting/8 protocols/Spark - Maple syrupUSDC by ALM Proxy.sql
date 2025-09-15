@@ -103,7 +103,7 @@ syrup_indices as (
         max_by(assets_ / 1e6, evt_block_time) as assets,
         max_by(shares_ / 1e6, evt_block_time) as shares,
         max_by(
-            assets_ / cast(shares_ as double),
+            (assets_ / 1e6) / (shares_ / 1e6), 
             evt_block_time
         ) as supply_index
     from (
@@ -192,7 +192,7 @@ syrup_rates as (
         apr_30d,
         apr_90d
     from syrup_apy
-    cross join query_5353955 i -- Spark - Accessibility Rewards 
+    cross join query_5353955 i
     where
         i.reward_code = 'BR'
         and dt between i.start_dt
