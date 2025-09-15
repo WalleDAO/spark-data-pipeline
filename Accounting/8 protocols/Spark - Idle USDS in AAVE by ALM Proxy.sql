@@ -1,4 +1,3 @@
--- header
 with
     spark_tokens (blockchain, category, symbol, contract_address, decimals, start_date) as (
         values
