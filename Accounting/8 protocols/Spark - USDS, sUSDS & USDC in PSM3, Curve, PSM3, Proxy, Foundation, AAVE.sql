@@ -158,4 +158,5 @@ with
 
 select *
 from protocol_rates
-order by dt desc, protocol_name asc, blockchain asc, token_symbol asc
+order by dt desc, protocol_name asc, 
+blockchain asc, token_symbol asc
