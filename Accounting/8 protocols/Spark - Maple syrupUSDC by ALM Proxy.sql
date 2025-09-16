@@ -83,6 +83,7 @@ syrup_indices as (
             from maplefinance_v2_ethereum.pool_v2_evt_deposit
             where
                 contract_address = 0x80ac24aA929eaF5013f6436cdA2a7ba190f5Cc0b -- syrupUSDC
+                and assets_>1 and shares_>1
             union all
             select
                 evt_block_time,
@@ -92,6 +93,7 @@ syrup_indices as (
             from maplefinance_v2_ethereum.pool_v2_evt_withdraw
             where
                 contract_address = 0x80ac24aA929eaF5013f6436cdA2a7ba190f5Cc0b -- syrupUSDC
+                and assets_>1 and shares_>1
         )
     group by 1
 ),
