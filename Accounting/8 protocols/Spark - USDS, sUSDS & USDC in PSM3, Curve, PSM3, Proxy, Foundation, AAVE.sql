@@ -20,7 +20,10 @@ with
             ('optimism', 'USDC', 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85, 6, date '2022-11-14'),
             ('unichain', 'USDC', 0x078D782b760474a361dDA0AF3839290b0EF57AD6, 6, date '2024-11-05'),
             -- USDT
-            ('ethereum', 'USDT', 0xdAC17F958D2ee523a2206206994597C13D831ec7, 6, date '2017-11-28')
+            ('ethereum', 'USDT', 0xdAC17F958D2ee523a2206206994597C13D831ec7, 6, date '2017-11-28'),
+            -- pyUSD
+            ('ethereum', 'PYUSD',0x6c3ea9036406852006290770bedfcaba0e23a0e8, 6, date '2022-11-08')
+
     ),
     -- Protocol targets
     spark_targets (code, reward_code, interest_code, blockchain, protocol_name, protocol_addr, start_date) as (
@@ -131,7 +134,7 @@ with
         from protocol_balances_cum b
         join spark_targets st using (blockchain, protocol_addr)
         where (st.code = 1 and b.token_symbol in ('sUSDS', 'USDS', 'USDC'))
-           or (st.code = 2 and b.token_symbol in ('sUSDS', 'USDS', 'USDC', 'USDT'))
+           or (st.code = 2 and b.token_symbol in ('sUSDS', 'USDS', 'USDC', 'USDT','PYUSD'))
            or (st.code = 4 and b.token_symbol = 'USDS')
            or (st.code = 6 and b.token_symbol in ('USDT','sUSDS'))
            or (st.code = 7 and b.token_symbol = 'USDS')
