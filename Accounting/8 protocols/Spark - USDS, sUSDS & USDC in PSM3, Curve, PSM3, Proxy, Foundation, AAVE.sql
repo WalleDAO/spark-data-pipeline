@@ -23,7 +23,6 @@ with
             ('ethereum', 'USDT', 0xdAC17F958D2ee523a2206206994597C13D831ec7, 6, date '2017-11-28'),
             -- pyUSD
             ('ethereum', 'PYUSD',0x6c3ea9036406852006290770bedfcaba0e23a0e8, 6, date '2022-11-08')
-
     ),
     -- Protocol targets
     spark_targets (code, reward_code, interest_code, blockchain, protocol_name, protocol_addr, start_date) as (
@@ -43,10 +42,11 @@ with
             (4, 'AR', 'BR', 'ethereum', 'Foundation', 0x92e4629a4510AF5819d7D1601464C233599fF5ec, date '2025-04-07'),
             -- Curve USDT
             (6, 'BR', 'BR', 'ethereum', 'Curve', 0x00836Fe54625BE242BcFA286207795405ca4fD10, date '2025-04-07'),
-            -- AAVE aEthUSDS
+            -- AAVE aEthUSDS - Track ALM supply to aETHUSDS
             (7, 'AR', 'BR', 'ethereum', 'AAVE aETHUSDS', 0x32a6268f9Ba3642Dda7892aDd74f1D34469A4259, date '2024-10-02')
     ),
     protocol_balances as (
+        -- Standard protocol balance tracking for codes 1,2,4,6
         select
             tr.blockchain,
             tt.token_addr,
@@ -62,8 +62,10 @@ with
             and tr."to" = st.protocol_addr
         where date(tr.block_date) >= tt.start_date
           and tt.token_symbol in ('sUSDS', 'USDS', 'USDC', 'USDT')
-          and st.code in (1, 2, 4, 6, 7)
+          and st.code in (1, 2, 4, 6)
+        
         union all
+        
         select
             tr.blockchain,
             tt.token_addr,
@@ -79,7 +81,54 @@ with
             and tr."from" = st.protocol_addr
         where date(tr.block_date) >= tt.start_date
           and tt.token_symbol in ('sUSDS', 'USDS', 'USDC', 'USDT')
-          and st.code in (1, 2, 4, 6, 7)
+          and st.code in (1, 2, 4, 6)
+        
+        union all
+        
+        -- Special tracking for AAVE aETHUSDS: Track ALM Proxy supplies to aETHUSDS
+        select
+            tr.blockchain,
+            tt_usds.token_addr,
+            tr.block_date as dt,
+            st_aave.protocol_addr as protocol_addr,
+            tr.amount_raw / power(10, tt_usds.decimals) as amount
+        from tokens.transfers tr
+        join token_targets tt_usds
+            on tr.blockchain = tt_usds.blockchain
+            and tr.contract_address = tt_usds.token_addr
+            and tt_usds.token_symbol = 'USDS'
+        join spark_targets st_alm
+            on tr.blockchain = st_alm.blockchain
+            and tr."from" = st_alm.protocol_addr
+            and st_alm.code = 2  -- ALM Proxy
+        join spark_targets st_aave
+            on tr.blockchain = st_aave.blockchain
+            and tr."to" = st_aave.protocol_addr
+            and st_aave.code = 7  -- AAVE aETHUSDS
+        where date(tr.block_date) >= st_aave.start_date
+        
+        union all
+        
+        select
+            tr.blockchain,
+            tt_usds.token_addr,
+            tr.block_date as dt,
+            st_aave.protocol_addr as protocol_addr,
+            -tr.amount_raw / power(10, tt_usds.decimals) as amount
+        from tokens.transfers tr
+        join token_targets tt_usds
+            on tr.blockchain = tt_usds.blockchain
+            and tr.contract_address = tt_usds.token_addr
+            and tt_usds.token_symbol = 'USDS'
+        join spark_targets st_alm
+            on tr.blockchain = st_alm.blockchain
+            and tr."to" = st_alm.protocol_addr
+            and st_alm.code = 2  -- ALM Proxy
+        join spark_targets st_aave
+            on tr.blockchain = st_aave.blockchain
+            and tr."from" = st_aave.protocol_addr
+            and st_aave.code = 7  -- AAVE aETHUSDS
+        where date(tr.block_date) >= st_aave.start_date
     ),
     totals_check as (
         select blockchain, token_addr, protocol_addr, sum(amount) as amount from protocol_balances group by 1,2,3
@@ -103,7 +152,7 @@ with
         from (select blockchain, protocol_addr, token_addr, min(dt) as start_dt from protocol_balances_sum group by 1,2,3) b
         cross join unnest(sequence(b.start_dt, current_date, interval '1' day)) as s(dt)
     ),
-    -- get cumulative balance
+    -- Calculate cumulative balance
     protocol_balances_cum as (
         select
             blockchain,
