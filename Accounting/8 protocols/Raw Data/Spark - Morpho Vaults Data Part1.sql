@@ -138,7 +138,6 @@ with
             sum(supply_shares) as daily_shares_change,
             sum(supply_amount) as daily_amount_change
         from vault_supply
-        where supply_shares > 0  
         group by 1, 2, 3
     ),
     
