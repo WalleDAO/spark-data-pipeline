@@ -1,12 +1,40 @@
-with 
-    sp_vault_addr (blockchain, category, symbol, vault_addr, start_date) as (
-        values
-            ('ethereum', 'vault', 'spDAI', 0x73e65dbd630f90604062f6e02fab9138e713edd9, date '2024-03-15'),
-            ('base', 'vault', 'spUSDC', 0x7BfA7C4f149E7415b73bdeDfe609237e29CBF34A, date '2024-12-30'),
-            ('ethereum', 'vault', 'spUSDS', 0xe41a0583334f0dc4e023acd0bfef3667f6fe0597, date '2025-07-16'),
-            ('ethereum', 'vault', 'spUSDC', 0x56A76b428244a50513ec81e225a293d128fd581D, date '2025-09-08')
-    ),
-    
+with sp_vault_addr (
+    blockchain,
+    category,
+    symbol,
+    vault_addr,
+    start_date
+) as (
+    values
+        (
+            'ethereum',
+            'vault',
+            'spDAI',
+            0x73e65dbd630f90604062f6e02fab9138e713edd9,
+            date '2024-03-15'
+        ),
+        (
+            'base',
+            'vault',
+            'spUSDC',
+            0x7BfA7C4f149E7415b73bdeDfe609237e29CBF34A,
+            date '2024-12-30'
+        ),
+        (
+            'ethereum',
+            'vault',
+            'spUSDS',
+            0xe41a0583334f0dc4e023acd0bfef3667f6fe0597,
+            date '2025-07-16'
+        ),
+        (
+            'ethereum',
+            'vault',
+            'spUSDC',
+            0x56A76b428244a50513ec81e225a293d128fd581D,
+            date '2025-09-08'
+        )
+),
 sp_alm_addr (
     blockchain,
     category,
@@ -22,72 +50,136 @@ sp_alm_addr (
             0x1601843c5E9bC251A3272907010AFa41Fa18347E,
             date '2024-10-23'
         ),
-        -- ALM Proxy @ Ethereum
         (
             'base',
             'user',
             'ALM Proxy',
             0x2917956eFF0B5eaF030abDB4EF4296DF775009cA,
             date '2024-10-23'
-        ) -- ALM Proxy @ Base
-),
-supply_events as (
-    select evt_block_time, chain, contract_address, shares, assets, owner, 'deposit' as side
-    from metamorpho_vaults_multichain.metamorpho_evt_deposit
-    where contract_address in (select vault_addr from sp_vault_addr)
-    union all
-    select evt_block_time, chain, contract_address, shares, assets, owner, 'deposit' as side
-    from metamorpho_vaults_multichain.metamorphov1_1_evt_deposit
-    where contract_address in (select vault_addr from sp_vault_addr)
-    union all
-    select evt_block_time, chain, contract_address, shares, assets, owner, 'withdraw' as side
-    from metamorpho_vaults_multichain.metamorpho_evt_withdraw
-    where contract_address in (select vault_addr from sp_vault_addr)
-    union all
-    select evt_block_time, chain, contract_address, shares, assets, owner, 'withdraw' as side
-    from metamorpho_vaults_multichain.metamorphov1_1_evt_withdraw
-    where contract_address in (select vault_addr from sp_vault_addr)
-),
-vault_transfers_sum as (
-    select
-        s.chain as blockchain,
-        date(s.evt_block_time) as dt,
-        s.contract_address as vault_addr,
-        s.owner as user_addr,
-        sum(
-            case 
-                when s.side = 'deposit' then s.shares / 1e18
-                when s.side = 'withdraw' then -(s.shares / 1e18)
-            end
-        ) as shares
-    from supply_events s
-    join sp_vault_addr v
-        on s.chain = v.blockchain
-        and s.contract_address = v.vault_addr
-    join sp_alm_addr u
-        on s.chain = u.blockchain
-        and s.owner = u.alm_addr
-    where s.shares > 1 and s.assets > 1
-    group by 1, 2, 3, 4
+        )
 ),
 seq as (
     select
-        blockchain,
-        vault_addr,
-        user_addr,
+        v.blockchain,
+        v.vault_addr,
         s.dt
-    from (
-            select
-                blockchain,
-                vault_addr,
-                user_addr,
-                min(dt) as start_dt
-            from vault_transfers_sum
-            group by 1, 2, 3
-        ) t
+    from sp_vault_addr v
     cross join unnest(
-            sequence(t.start_dt, current_date, interval '1' day)
+            sequence(v.start_date, current_date, interval '1' day)
         ) as s(dt)
+),
+vault_total_supply as (
+    select
+        v.blockchain,
+        v.vault_addr,
+        t.evt_block_date as dt,
+        sum(
+            case
+                when t."to" = 0x0000000000000000000000000000000000000000
+                    then - cast(t.value as double) / 1e18
+                when t."from" = 0x0000000000000000000000000000000000000000
+                    then cast(t.value as double) / 1e18
+                else 0
+            end
+        ) as net_shares_change
+    from sp_vault_addr v
+    join (
+            select
+                *
+            from erc20_ethereum.evt_transfer
+            union all
+            select
+                *
+            from erc20_base.evt_transfer
+        ) t
+        on t.contract_address = v.vault_addr
+    where
+        (
+            t."to" = 0x0000000000000000000000000000000000000000
+            or t."from" = 0x0000000000000000000000000000000000000000
+        )
+    group by 1, 2, 3
+),
+alm_holdings as (
+    select
+        v.blockchain,
+        v.vault_addr,
+        t.evt_block_date as dt,
+        sum(
+            case
+                when t."to" = a.alm_addr
+                    then cast(t.value as double) / 1e18
+                when t."from" = a.alm_addr
+                    then - cast(t.value as double) / 1e18
+                else 0
+            end
+        ) as net_alm_shares_change
+    from sp_vault_addr v
+    join sp_alm_addr a
+        on v.blockchain = a.blockchain
+    join (
+            select
+                *
+            from erc20_ethereum.evt_transfer
+            union all
+            select
+                *
+            from erc20_base.evt_transfer
+        ) t
+        on t.contract_address = v.vault_addr
+    where
+        (
+            t."to" = a.alm_addr
+            or t."from" = a.alm_addr
+        )
+    group by 1, 2, 3
+),
+total_supply_cumulative as (
+    select
+        seq.blockchain,
+        seq.vault_addr,
+        seq.dt,
+        sum(coalesce(vts.net_shares_change, 0)) over (
+            partition by seq.blockchain,
+            seq.vault_addr
+            order by seq.dt rows between unbounded preceding
+                and current row
+        ) as total_supply
+    from seq
+    left join vault_total_supply vts
+        on seq.blockchain = vts.blockchain
+        and seq.vault_addr = vts.vault_addr
+        and seq.dt = vts.dt
+),
+alm_holdings_cumulative as (
+    select
+        seq.blockchain,
+        seq.vault_addr,
+        seq.dt,
+        sum(coalesce(ah.net_alm_shares_change, 0)) over (
+            partition by seq.blockchain,
+            seq.vault_addr
+            order by seq.dt rows between unbounded preceding
+                and current row
+        ) as alm_holdings
+    from seq
+    left join alm_holdings ah
+        on seq.blockchain = ah.blockchain
+        and seq.vault_addr = ah.vault_addr
+        and seq.dt = ah.dt
+),
+supply_shares as (
+    select
+        tsc.blockchain,
+        tsc.vault_addr,
+        tsc.dt,
+        tsc.total_supply,
+        coalesce(ahc.alm_holdings, 0) as alm_holdings
+    from total_supply_cumulative tsc
+    left join alm_holdings_cumulative ahc
+        on tsc.blockchain = ahc.blockchain
+        and tsc.vault_addr = ahc.vault_addr
+        and tsc.dt = ahc.dt
 ),
 vault_data as (
     select
@@ -96,12 +188,8 @@ vault_data as (
         v.token_symbol,
         v.dt,
         v.supply_index,
-        v.performance_fee,
-        v.vault_supply_amount
+        v.performance_fee
     from query_5739088 v
-    join sp_vault_addr va
-        on v.blockchain = va.blockchain
-        and v.vault_address = va.vault_addr
 ),
 vault_data_part2 as (
     select
@@ -122,22 +210,15 @@ vault_balances as (
         v.supply_index,
         va.vault_utilization as util_rate,
         v.performance_fee,
-        v.vault_supply_amount as supply_amount,
-        v.vault_supply_amount*va.vault_utilization as borrow_amount,
+        s.total_supply * v.supply_index as supply_amount,
+        s.total_supply * v.supply_index * va.vault_utilization as borrow_amount,
         va.vault_supply_rate as supply_rate,
         va.vault_borrow_rate as borrow_rate,
-        v.vault_supply_amount - v.vault_supply_amount*va.vault_utilization as idle_amount,
-        sum(coalesce(t.shares, 0)) over (
-            partition by blockchain,
-            vault_addr,
-            user_addr
-            order by dt asc
-        ) * v.supply_index as alm_supply_amount
-    from seq s
+        s.total_supply * v.supply_index - s.total_supply * v.supply_index * va.vault_utilization as idle_amount,
+        s.alm_holdings * v.supply_index as alm_supply_amount
+    from supply_shares s
     left join vault_data v
         using (blockchain, vault_addr, dt)
-    left join vault_transfers_sum t
-        using (blockchain, vault_addr, user_addr, dt)
     left join vault_data_part2 va
         using (blockchain, vault_addr, dt)
 ),
@@ -159,10 +240,10 @@ vault_balances_rates as (
         i.reward_code,
         i.reward_per,
         'APR-BR' as interest_code,
-        supply_rate-i.reward_per as interest_per,
+        supply_rate - i.reward_per as interest_per,
         b.performance_fee
     from vault_balances b
-    cross join query_5353955 i 
+    cross join query_5353955 i
     where
         i.reward_code = 'BR'
         and b.dt between i.start_dt
