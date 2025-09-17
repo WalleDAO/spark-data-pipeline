@@ -1,11 +1,4 @@
-with addr (syrup_addr, alm_addr) as (
-    values
-        (
-            0x80ac24aA929eaF5013f6436cdA2a7ba190f5Cc0b,
-            0x1601843c5E9bC251A3272907010AFa41Fa18347E
-        )
-),
-seq as (
+with seq as (
     select
         d.dt
     from (
@@ -13,51 +6,44 @@ seq as (
                 min(evt_block_date) as start_dt
             from maplefinance_v2_ethereum.pool_v2_evt_deposit
             where
-                contract_address = 0x80ac24aA929eaF5013f6436cdA2a7ba190f5Cc0b -- syrupUSDC
+                contract_address = 0x80ac24aA929eaF5013f6436cdA2a7ba190f5Cc0b
         ) d
     cross join unnest(
             sequence(d.start_dt, current_date, interval '1' day)
         ) as d(dt)
 ),
--- Track ALM's share changes in Maple SyrupUSDC pool
 syrup_shares as (
     select 
         evt_block_date as dt,
         sum(
             case 
-                when owner_ = (select alm_addr from addr) then cast(shares_ as double) / 1e6
+                when "to" = 0x1601843c5E9bC251A3272907010AFa41Fa18347E 
+                then cast(value as double) / 1e6
                 else 0 
             end
-        ) as deposit_shares,
-        0 as withdraw_shares
-    from maplefinance_v2_ethereum.pool_v2_evt_deposit
-    where contract_address = (select syrup_addr from addr)
-    group by 1
-    
-    union all
-    
-    select 
-        evt_block_date as dt,
-        0 as deposit_shares,
+        ) as inflow_shares,
         sum(
             case 
-                when owner_ = (select alm_addr from addr) then cast(shares_ as double) / 1e6
+                when "from" = 0x1601843c5E9bC251A3272907010AFa41Fa18347E 
+                then cast(value as double) / 1e6
                 else 0 
             end
-        ) as withdraw_shares
-    from maplefinance_v2_ethereum.pool_v2_evt_withdraw
-    where contract_address = (select syrup_addr from addr)
+        ) as outflow_shares
+    from erc20_ethereum.evt_transfer
+    where contract_address = 0x80ac24aA929eaF5013f6436cdA2a7ba190f5Cc0b
+    and (
+        "to" = 0x1601843c5E9bC251A3272907010AFa41Fa18347E 
+        or "from" = 0x1601843c5E9bC251A3272907010AFa41Fa18347E
+    )
     group by 1
 ),
-
 syrup_shares_daily as (
     select 
         dt,
-        sum(deposit_shares) - sum(withdraw_shares) as net_shares_change
+        sum(inflow_shares) - sum(outflow_shares) as net_shares_change
     from syrup_shares
     group by 1
 ),
--- Cumulative shares held by ALM
 syrup_shares_cum as (
     select 
         dt,
@@ -82,7 +68,7 @@ syrup_indices as (
                 shares_
             from maplefinance_v2_ethereum.pool_v2_evt_deposit
             where
-                contract_address = 0x80ac24aA929eaF5013f6436cdA2a7ba190f5Cc0b -- syrupUSDC
+                contract_address = 0x80ac24aA929eaF5013f6436cdA2a7ba190f5Cc0b
                 and assets_>1 and shares_>1
             union all
             select
@@ -92,7 +78,7 @@ syrup_indices as (
                 shares_
             from maplefinance_v2_ethereum.pool_v2_evt_withdraw
             where
-                contract_address = 0x80ac24aA929eaF5013f6436cdA2a7ba190f5Cc0b -- syrupUSDC
+                contract_address = 0x80ac24aA929eaF5013f6436cdA2a7ba190f5Cc0b
                 and assets_>1 and shares_>1
         )
     group by 1
@@ -100,7 +86,6 @@ syrup_indices as (
 syrup_gaps as (
     select
         dt,
-        -- Amount: ALM shares multiplied by current supply index (current position value)
         coalesce(
             s.total_shares * last_value(i.supply_index) ignore nulls over (order by dt),
             0
