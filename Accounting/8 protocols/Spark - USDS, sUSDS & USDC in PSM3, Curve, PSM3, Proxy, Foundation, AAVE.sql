@@ -24,7 +24,7 @@ with
             -- pyUSD
             ('ethereum', 'PYUSD',0x6c3ea9036406852006290770bedfcaba0e23a0e8, 6, date '2022-11-08')
     ),
-    -- Protocol targets
+    -- Protocol targets 
     spark_targets (code, reward_code, interest_code, blockchain, protocol_name, protocol_addr, start_date) as (
         values
             -- PSM3
@@ -39,14 +39,184 @@ with
             (2, 'BR', 'BR', 'optimism', 'ALM Proxy', 0x876664f0c9Ff24D1aa355Ce9f1680AE1A5bf36fB, date '2025-05-07'),
             (2, 'BR', 'BR', 'unichain', 'ALM Proxy', 0x345E368fcCd62266B3f5F37C9a131FD1c39f5869, date '2025-05-15'),
             -- Spark Foundation Multisig
-            (4, 'AR', 'BR', 'ethereum', 'Foundation', 0x92e4629a4510AF5819d7D1601464C233599fF5ec, date '2025-04-07'),
-            -- Curve USDT
-            (6, 'BR', 'BR', 'ethereum', 'Curve', 0x00836Fe54625BE242BcFA286207795405ca4fD10, date '2025-04-07'),
-            -- AAVE aEthUSDS - Track ALM supply to aETHUSDS
-            (7, 'AR', 'BR', 'ethereum', 'AAVE aETHUSDS', 0x32a6268f9Ba3642Dda7892aDd74f1D34469A4259, date '2024-10-02')
+            (4, 'AR', 'BR', 'ethereum', 'Foundation', 0x92e4629a4510AF5819d7D1601464C233599fF5ec, date '2025-04-07')
     ),
+    
+    ----------------------------------------------------------------
+    -- AAVE aETHUSDS tracking
+    ----------------------------------------------------------------
+     aave_transfers AS (
+        SELECT 
+            DATE(evt_block_date) AS dt,
+            SUM(CASE 
+                WHEN t."from" = 0x1601843c5E9bC251A3272907010AFa41Fa18347E 
+                     AND t."to" = 0x32a6268f9Ba3642Dda7892aDd74f1D34469A4259
+                THEN CAST(value AS DOUBLE) / POWER(10, 18) 
+                WHEN t."from" = 0x32a6268f9Ba3642Dda7892aDd74f1D34469A4259 
+                     AND t."to" = 0x1601843c5E9bC251A3272907010AFa41Fa18347E
+                THEN -CAST(value AS DOUBLE) / POWER(10, 18)
+                ELSE 0 
+            END) AS usds_change
+        FROM erc20_ethereum.evt_Transfer t
+        WHERE t.contract_address = 0xdC035D45d973E3EC169d2276DDab16f1e407384F
+          AND ((t."from" = 0x1601843c5E9bC251A3272907010AFa41Fa18347E AND t."to" = 0x32a6268f9Ba3642Dda7892aDd74f1D34469A4259)
+               OR (t."from" = 0x32a6268f9Ba3642Dda7892aDd74f1D34469A4259 AND t."to" = 0x1601843c5E9bC251A3272907010AFa41Fa18347E))
+          AND DATE(evt_block_date) >= date '2024-10-02'
+        GROUP BY DATE(evt_block_date)
+    ),
+    
+    aave_seq AS (
+        SELECT dt
+        FROM unnest(sequence(date '2024-10-02', current_date, interval '1' day)) as t(dt)
+    ),
+    
+    aave_balances AS (
+        SELECT 
+            s.dt,
+            'ethereum' as blockchain,
+            'AAVE aETHUSDS' as protocol_name,
+            'USDS' as token_symbol,
+            'AR' as reward_code,
+            'BR' as interest_code,
+            COALESCE(SUM(at.usds_change) OVER (ORDER BY s.dt), 0) as amount
+        FROM aave_seq s
+        LEFT JOIN aave_transfers at ON at.dt = s.dt
+    ),
+    
+    ----------------------------------------------------------------
+    -- CURVE CALCULATION - FIXED TO AVOID DUPLICATES
+    ----------------------------------------------------------------
+    -- Aggregate all Curve-related changes by day
+    curve_daily_changes AS (
+        -- LP token changes
+        SELECT 
+            DATE(evt_block_date) AS dt,
+            'lp_change' as change_type,
+            SUM(CASE WHEN t."to" = 0x1601843c5E9bC251A3272907010AFa41Fa18347E
+                     THEN CAST(value AS DOUBLE) / POWER(10, 18)
+                     ELSE -CAST(value AS DOUBLE) / POWER(10, 18) END) AS amount
+        FROM erc20_ethereum.evt_Transfer t
+        WHERE t.contract_address = 0x00836Fe54625BE242BcFA286207795405ca4fD10
+          AND (t."to" = 0x1601843c5E9bC251A3272907010AFa41Fa18347E 
+               OR t."from" = 0x1601843c5E9bC251A3272907010AFa41Fa18347E)
+          AND DATE(evt_block_date) >= date '2025-04-07'
+        GROUP BY DATE(evt_block_date)
+        
+        UNION ALL
+        
+        -- LP supply changes
+        SELECT 
+            DATE(evt_block_date) AS dt,
+            'supply_change' as change_type,
+            SUM(CASE WHEN "to" = 0x0000000000000000000000000000000000000000 
+                     THEN -CAST(value AS DOUBLE) / POWER(10, 18)  -- burn
+                     WHEN "from" = 0x0000000000000000000000000000000000000000 
+                     THEN CAST(value AS DOUBLE) / POWER(10, 18)   -- mint
+                     ELSE 0 END) AS amount
+        FROM erc20_ethereum.evt_Transfer t
+        WHERE t.contract_address = 0x00836Fe54625BE242BcFA286207795405ca4fD10
+          AND ("to" = 0x0000000000000000000000000000000000000000 
+               OR "from" = 0x0000000000000000000000000000000000000000)
+          AND DATE(evt_block_date) >= date '2025-04-07'
+        GROUP BY DATE(evt_block_date)
+        
+        UNION ALL
+        
+        -- sUSDS pool changes
+        SELECT 
+            DATE(evt_block_date) AS dt,
+            'susds_pool_change' as change_type,
+            SUM(CASE WHEN t."to" = 0x00836Fe54625BE242BcFA286207795405ca4fD10
+                     THEN CAST(value AS DOUBLE) / POWER(10, 18)
+                     ELSE -CAST(value AS DOUBLE) / POWER(10, 18) END) AS amount
+        FROM erc20_ethereum.evt_Transfer t
+        WHERE t.contract_address = 0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD
+          AND (t."to" = 0x00836Fe54625BE242BcFA286207795405ca4fD10 
+               OR t."from" = 0x00836Fe54625BE242BcFA286207795405ca4fD10)
+          AND DATE(evt_block_date) >= date '2025-04-07'
+        GROUP BY DATE(evt_block_date)
+        
+        UNION ALL
+        
+        -- USDT pool changes
+        SELECT 
+            DATE(evt_block_date) AS dt,
+            'usdt_pool_change' as change_type,
+            SUM(CASE WHEN t."to" = 0x00836Fe54625BE242BcFA286207795405ca4fD10
+                     THEN CAST(value AS DOUBLE) / POWER(10, 6)
+                     ELSE -CAST(value AS DOUBLE) / POWER(10, 6) END) AS amount
+        FROM erc20_ethereum.evt_Transfer t
+        WHERE t.contract_address = 0xdAC17F958D2ee523a2206206994597C13D831ec7
+          AND (t."to" = 0x00836Fe54625BE242BcFA286207795405ca4fD10 
+               OR t."from" = 0x00836Fe54625BE242BcFA286207795405ca4fD10)
+          AND DATE(evt_block_date) >= date '2025-04-07'
+        GROUP BY DATE(evt_block_date)
+    ),
+    
+    -- Generate daily sequence for Curve
+    curve_seq AS (
+        SELECT dt
+        FROM unnest(sequence(date '2025-04-07', current_date, interval '1' day)) as t(dt)
+    ),
+    
+    -- Calculate cumulative values - FIXED
+    curve_cumulative AS (
+        SELECT 
+            s.dt,
+            SUM(COALESCE(cdc_lp.amount, 0)) 
+                OVER (ORDER BY s.dt) as cum_lp_balance,
+            SUM(COALESCE(cdc_supply.amount, 0)) 
+                OVER (ORDER BY s.dt) as cum_total_supply,
+            SUM(COALESCE(cdc_susds.amount, 0)) 
+                OVER (ORDER BY s.dt) as cum_susds_pool,
+            SUM(COALESCE(cdc_usdt.amount, 0)) 
+                OVER (ORDER BY s.dt) as cum_usdt_pool
+        FROM curve_seq s
+        LEFT JOIN curve_daily_changes cdc_lp 
+            ON cdc_lp.dt = s.dt AND cdc_lp.change_type = 'lp_change'
+        LEFT JOIN curve_daily_changes cdc_supply 
+            ON cdc_supply.dt = s.dt AND cdc_supply.change_type = 'supply_change'
+        LEFT JOIN curve_daily_changes cdc_susds 
+            ON cdc_susds.dt = s.dt AND cdc_susds.change_type = 'susds_pool_change'
+        LEFT JOIN curve_daily_changes cdc_usdt 
+            ON cdc_usdt.dt = s.dt AND cdc_usdt.change_type = 'usdt_pool_change'
+    ),
+    
+    -- Calculate final Curve balances - FIXED
+    curve_balances AS (
+        SELECT 
+            dt,
+            'ethereum' as blockchain,
+            'Curve' as protocol_name,
+            'sUSDS' as token_symbol,
+            'BR' as reward_code,
+            'BR' as interest_code,
+            CASE WHEN cum_total_supply > 0 
+                 THEN (cum_lp_balance / cum_total_supply) * cum_susds_pool
+                 ELSE 0 END as amount
+        FROM curve_cumulative
+        WHERE cum_total_supply > 0
+        
+        UNION ALL
+        
+        SELECT 
+            dt,
+            'ethereum' as blockchain,
+            'Curve' as protocol_name,
+            'USDT' as token_symbol,
+            'BR' as reward_code,
+            'BR' as interest_code,
+            CASE WHEN cum_total_supply > 0 
+                 THEN (cum_lp_balance / cum_total_supply) * cum_usdt_pool
+                 ELSE 0 END as amount
+        FROM curve_cumulative
+        WHERE cum_total_supply > 0
+    ),
+    
+    ----------------------------------------------------------------
+    -- Standard protocol balance tracking for codes 1,2,4
+    ----------------------------------------------------------------
     protocol_balances as (
-        -- Standard protocol balance tracking for codes 1,2,4,6
         select
             tr.blockchain,
             tt.token_addr,
@@ -61,8 +231,8 @@ with
             on tr.blockchain = st.blockchain
             and tr."to" = st.protocol_addr
         where date(tr.block_date) >= tt.start_date
-          and tt.token_symbol in ('sUSDS', 'USDS', 'USDC', 'USDT')
-          and st.code in (1, 2, 4, 6)
+          and tt.token_symbol in ('sUSDS', 'USDS', 'USDC', 'USDT', 'PYUSD')
+          and st.code in (1, 2, 4)
         
         union all
         
@@ -80,59 +250,13 @@ with
             on tr.blockchain = st.blockchain
             and tr."from" = st.protocol_addr
         where date(tr.block_date) >= tt.start_date
-          and tt.token_symbol in ('sUSDS', 'USDS', 'USDC', 'USDT')
-          and st.code in (1, 2, 4, 6)
-        
-        union all
-        
-        -- Special tracking for AAVE aETHUSDS: Track ALM Proxy supplies to aETHUSDS
-        select
-            tr.blockchain,
-            tt_usds.token_addr,
-            tr.block_date as dt,
-            st_aave.protocol_addr as protocol_addr,
-            tr.amount_raw / power(10, tt_usds.decimals) as amount
-        from tokens.transfers tr
-        join token_targets tt_usds
-            on tr.blockchain = tt_usds.blockchain
-            and tr.contract_address = tt_usds.token_addr
-            and tt_usds.token_symbol = 'USDS'
-        join spark_targets st_alm
-            on tr.blockchain = st_alm.blockchain
-            and tr."from" = st_alm.protocol_addr
-            and st_alm.code = 2  -- ALM Proxy
-        join spark_targets st_aave
-            on tr.blockchain = st_aave.blockchain
-            and tr."to" = st_aave.protocol_addr
-            and st_aave.code = 7  -- AAVE aETHUSDS
-        where date(tr.block_date) >= st_aave.start_date
-        
-        union all
-        
-        select
-            tr.blockchain,
-            tt_usds.token_addr,
-            tr.block_date as dt,
-            st_aave.protocol_addr as protocol_addr,
-            -tr.amount_raw / power(10, tt_usds.decimals) as amount
-        from tokens.transfers tr
-        join token_targets tt_usds
-            on tr.blockchain = tt_usds.blockchain
-            and tr.contract_address = tt_usds.token_addr
-            and tt_usds.token_symbol = 'USDS'
-        join spark_targets st_alm
-            on tr.blockchain = st_alm.blockchain
-            and tr."to" = st_alm.protocol_addr
-            and st_alm.code = 2  -- ALM Proxy
-        join spark_targets st_aave
-            on tr.blockchain = st_aave.blockchain
-            and tr."from" = st_aave.protocol_addr
-            and st_aave.code = 7  -- AAVE aETHUSDS
-        where date(tr.block_date) >= st_aave.start_date
+          and tt.token_symbol in ('sUSDS', 'USDS', 'USDC', 'USDT', 'PYUSD')
+          and st.code in (1, 2, 4)
     ),
-    totals_check as (
-        select blockchain, token_addr, protocol_addr, sum(amount) as amount from protocol_balances group by 1,2,3
-    ),
+    
+    ----------------------------------------------------------------
+    -- Aggregate daily changes
+    ----------------------------------------------------------------
     protocol_balances_sum as (
         select
             blockchain,
@@ -143,39 +267,49 @@ with
         from protocol_balances
         group by 1,2,3,4
     ),
+    
+    ----------------------------------------------------------------
+    -- Generate daily sequence for standard protocols
+    ----------------------------------------------------------------
     seq as (
         select
             b.blockchain,
             b.protocol_addr,
             b.token_addr,
             s.dt
-        from (select blockchain, protocol_addr, token_addr, min(dt) as start_dt from protocol_balances_sum group by 1,2,3) b
+        from (
+            select blockchain, protocol_addr, token_addr, min(dt) as start_dt 
+            from protocol_balances_sum 
+            group by 1,2,3
+        ) b
         cross join unnest(sequence(b.start_dt, current_date, interval '1' day)) as s(dt)
     ),
-    -- Calculate cumulative balance
+    
+    ----------------------------------------------------------------
+    -- Calculate cumulative balances for standard protocols
+    ----------------------------------------------------------------
     protocol_balances_cum as (
         select
-            blockchain,
-            protocol_addr,
+            s.blockchain,
+            s.protocol_addr,
             tt.token_symbol,
-            dt,
-            sum(coalesce(b.amount, 0)) over (partition by blockchain, protocol_addr, token_addr order by dt asc) as amount
+            s.dt,
+            sum(coalesce(b.amount, 0)) over (partition by s.blockchain, s.protocol_addr, s.token_addr order by s.dt asc) as amount
         from seq s
-        join token_targets tt using (blockchain, token_addr)
-        join spark_targets st using (blockchain, protocol_addr)
-        left join protocol_balances_sum b using (blockchain, protocol_addr, token_addr, dt)
+        join token_targets tt on s.blockchain=tt.blockchain and s.token_addr=tt.token_addr
+        left join protocol_balances_sum b on s.blockchain=b.blockchain and s.token_addr=b.token_addr
+        and s.protocol_addr=b.protocol_addr and s.dt=b.dt
     ),
+    
+    ----------------------------------------------------------------
+    -- Filter and categorize balances for standard protocols
+    ----------------------------------------------------------------
     protocol_balances_cum_filter as (
         select
             b.dt,
             blockchain,
             st.code,
-            case
-                when st.reward_code != '?' then st.reward_code
-                when b.token_symbol = 'USDS' then 'AR'
-                when b.token_symbol = 'sUSDS' then 'XR'
-                when b.token_symbol = 'USDC' then 'BR'
-            end as reward_code,
+            st.reward_code,
             st.interest_code,
             st.protocol_name,
             b.token_symbol,
@@ -185,9 +319,50 @@ with
         where (st.code = 1 and b.token_symbol in ('sUSDS', 'USDS', 'USDC'))
            or (st.code = 2 and b.token_symbol in ('sUSDS', 'USDS', 'USDC', 'USDT','PYUSD'))
            or (st.code = 4 and b.token_symbol = 'USDS')
-           or (st.code = 6 and b.token_symbol in ('USDT','sUSDS'))
-           or (st.code = 7 and b.token_symbol = 'USDS')
     ),
+    
+    ----------------------------------------------------------------
+    -- Combine all protocols
+    ----------------------------------------------------------------
+    all_balances AS (
+        SELECT 
+            dt,
+            blockchain,
+            reward_code,
+            interest_code,
+            protocol_name,
+            token_symbol,
+            IF(amount > 1e-6, amount, 0) as amount
+        FROM protocol_balances_cum_filter
+        
+        UNION ALL
+        
+        SELECT 
+            dt,
+            blockchain,
+            reward_code,
+            interest_code,
+            protocol_name,
+            token_symbol,
+            IF(amount > 1e-6, amount, 0) as amount
+        FROM curve_balances
+        
+        UNION ALL
+        
+        SELECT 
+            dt,
+            blockchain,
+            reward_code,
+            interest_code,
+            protocol_name,
+            token_symbol,
+            IF(amount > 1e-6, amount, 0) as amount
+        FROM aave_balances
+    ),
+    
+    ----------------------------------------------------------------
+    -- Join with rates data
+    ----------------------------------------------------------------
     protocol_rates as (
         select
             b.dt,
@@ -199,7 +374,7 @@ with
             b.interest_code,
             -i.reward_per as interest_per,
             b.amount
-        from protocol_balances_cum_filter b
+        from all_balances b
         left join query_5353955 r
             on b.reward_code = r.reward_code
             and b.dt between r.start_dt and r.end_dt
