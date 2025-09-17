@@ -17,17 +17,6 @@ with
             ('ethereum', 'vault', 'spUSDC', 0x56A76b428244a50513ec81e225a293d128fd581D, date '2025-09-08')
     ),
     
-    -- Get latest curator changes
-    vault_curator_change as (
-        SELECT 
-            chain as blockchain, 
-            contract_address, 
-            max_by(newCurator, evt_block_time) as curator
-        FROM metamorpho_vaults_multichain.metamorphov1_1_evt_setcurator
-        WHERE contract_address in (select vault_addr from sp_vault_addr)
-        GROUP BY 1, 2
-    ),
-    
     -- Get vault creation events
     vault_creation as (
         select
@@ -35,7 +24,6 @@ with
             evt_block_time as creation_date,
             metamorpho as vault_address,
             asset as token_address,
-            COALESCE(vcc.curator, initialOwner) as owner_address,
             name as vault_name,
             symbol as vault_symbol
         from (
@@ -43,22 +31,7 @@ with
             union all
             select *, 1.1 as version from metamorpho_factory_multichain.metamorphov1_1factory_evt_createmetamorpho
         ) as c
-        LEFT JOIN vault_curator_change as vcc 
-            on c.chain = vcc.blockchain 
-            and c.metamorpho = vcc.contract_address
         WHERE c.metamorpho in (select vault_addr from sp_vault_addr)
-    ),
-    
-    -- Get latest vault symbol changes  
-    vault_symbol_change as (
-        select 
-            chain, 
-            contract_address, 
-            max_by(symbol, evt_block_number) as vault_symbol
-        from metamorpho_vaults_multichain.metamorphov1_1_evt_setsymbol
-        where symbol != ''
-        and contract_address in (select vault_addr from sp_vault_addr)
-        group by 1, 2
     ),
 
     -- Get vault metadata (filtered by our specific vaults)
@@ -71,16 +44,11 @@ with
             v.vault_address,
             t.symbol as token_symbol,
             t.decimals as token_decimals,
-            18 as market_decimals,
-            coalesce(s.vault_symbol, v.vault_symbol) as vault_symbol
-            
+            18 as market_decimals    
         from vault_creation v
         left join dune.steakhouse.result_token_info t
             on v.token_address = t.token_address
             and v.blockchain = t.blockchain
-        left join vault_symbol_change s
-            on v.blockchain = s.chain
-            and v.vault_address = s.contract_address
     ),
     
     -- Generate time series for each vault
@@ -134,9 +102,7 @@ with
             dt,
             blockchain,
             vault_address,
-            max_by(supply_amount/supply_shares, ts) as daily_share_price,
-            sum(supply_shares) as daily_shares_change,
-            sum(supply_amount) as daily_amount_change
+            max_by(supply_amount/supply_shares, ts) as daily_share_price
         from vault_supply
         group by 1, 2, 3
     ),
@@ -161,19 +127,6 @@ with
             and vs.blockchain = dsp.blockchain
             and vs.vault_address = dsp.vault_address
     ),
-    
-    -- Daily vault supply amount calculation
-    vault_supply_daily as (
-        select
-            dt,
-            blockchain,
-            vault_address,
-            sum(supply_shares) as daily_shares_change,
-            sum(supply_amount) as daily_amount_change
-        from vault_supply
-        group by 1, 2, 3
-    ),
-    
     -- Get performance fees (filtered)
     vault_performance_fees as (
         select
@@ -191,30 +144,8 @@ with
             where contract_address in (select vault_addr from sp_vault_addr)
         )
         group by 1, 2, 3
-    ),
-    
-    -- Calculate cumulative vault supply amount
-    vault_supply_cumulative as (
-        select
-            vs.dt,
-            vs.blockchain,
-            vs.vault_address,
-            sum(coalesce(vsd.daily_shares_change, 0)) over (
-                partition by vs.blockchain, vs.vault_address
-                order by vs.dt
-                rows between unbounded preceding and current row
-            ) as cumulative_shares,
-            sum(coalesce(vsd.daily_amount_change, 0)) over (
-                partition by vs.blockchain, vs.vault_address
-                order by vs.dt
-                rows between unbounded preceding and current row
-            ) as cumulative_amount
-        from vault_series vs
-        left join vault_supply_daily vsd
-            on vs.dt = vsd.dt
-            and vs.blockchain = vsd.blockchain
-            and vs.vault_address = vsd.vault_address
     )
+    
 
 -- Final output
 SELECT 
@@ -238,10 +169,7 @@ SELECT
         ) 
     end as performance_fee,
     vd.token_symbol,
-    spd.share_price as supply_index,
-    vd.vault_symbol,
-    vsc.cumulative_shares * spd.share_price as vault_supply_amount
-
+    spd.share_price as supply_index
 FROM share_price_daily spd
 JOIN vault_data vd 
     ON spd.blockchain = vd.blockchain 
@@ -250,9 +178,4 @@ LEFT JOIN vault_performance_fees vpf
     ON spd.dt = vpf.dt 
     AND spd.blockchain = vpf.blockchain 
     AND spd.vault_address = vpf.vault_address
-LEFT JOIN vault_supply_cumulative vsc
-    ON spd.dt = vsc.dt
-    AND spd.blockchain = vsc.blockchain
-    AND spd.vault_address = vsc.vault_address
-
 ORDER BY spd.dt DESC, spd.vault_address
