@@ -329,6 +329,45 @@ with
         WHERE DATE(tr.evt_block_time) >= tt.start_date
           AND tt.token_symbol IN ('sUSDS', 'USDS', 'USDC', 'USDT', 'PYUSD')
           AND st.code IN (1, 2, 4)
+        
+        UNION ALL
+        
+        -- Unichain transfers
+        SELECT
+            'unichain' as blockchain,
+            tt.token_addr,
+            DATE(tr.evt_block_time) as dt,
+            tr."to" as protocol_addr,
+            CAST(tr.value AS DOUBLE) / POWER(10, tt.decimals) as amount
+        FROM erc20_unichain.evt_Transfer tr
+        JOIN token_targets tt
+            ON tt.blockchain = 'unichain'
+            AND tr.contract_address = tt.token_addr
+        JOIN spark_targets st
+            ON st.blockchain = 'unichain'
+            AND tr."to" = st.protocol_addr
+        WHERE DATE(tr.evt_block_time) >= tt.start_date
+          AND tt.token_symbol IN ('sUSDS', 'USDS', 'USDC', 'USDT', 'PYUSD')
+          AND st.code IN (1, 2, 4)
+        
+        UNION ALL
+        
+        SELECT
+            'unichain' as blockchain,
+            tt.token_addr,
+            DATE(tr.evt_block_time) as dt,
+            tr."from" as protocol_addr,
+            -CAST(tr.value AS DOUBLE) / POWER(10, tt.decimals) as amount
+        FROM erc20_unichain.evt_Transfer tr
+        JOIN token_targets tt
+            ON tt.blockchain = 'unichain'
+            AND tr.contract_address = tt.token_addr
+        JOIN spark_targets st
+            ON st.blockchain = 'unichain'
+            AND tr."from" = st.protocol_addr
+        WHERE DATE(tr.evt_block_time) >= tt.start_date
+          AND tt.token_symbol IN ('sUSDS', 'USDS', 'USDC', 'USDT', 'PYUSD')
+          AND st.code IN (1, 2, 4)
     ),
     
     ----------------------------------------------------------------
