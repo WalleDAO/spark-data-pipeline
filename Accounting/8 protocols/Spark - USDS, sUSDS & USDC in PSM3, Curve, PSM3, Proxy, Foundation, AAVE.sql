@@ -43,47 +43,6 @@ with
     ),
     
     ----------------------------------------------------------------
-    -- AAVE aETHUSDS tracking
-    ----------------------------------------------------------------
-     aave_transfers AS (
-        SELECT 
-            DATE(evt_block_date) AS dt,
-            SUM(CASE 
-                WHEN t."from" = 0x1601843c5E9bC251A3272907010AFa41Fa18347E 
-                     AND t."to" = 0x32a6268f9Ba3642Dda7892aDd74f1D34469A4259
-                THEN CAST(value AS DOUBLE) / POWER(10, 18) 
-                WHEN t."from" = 0x32a6268f9Ba3642Dda7892aDd74f1D34469A4259 
-                     AND t."to" = 0x1601843c5E9bC251A3272907010AFa41Fa18347E
-                THEN -CAST(value AS DOUBLE) / POWER(10, 18)
-                ELSE 0 
-            END) AS usds_change
-        FROM erc20_ethereum.evt_Transfer t
-        WHERE t.contract_address = 0xdC035D45d973E3EC169d2276DDab16f1e407384F
-          AND ((t."from" = 0x1601843c5E9bC251A3272907010AFa41Fa18347E AND t."to" = 0x32a6268f9Ba3642Dda7892aDd74f1D34469A4259)
-               OR (t."from" = 0x32a6268f9Ba3642Dda7892aDd74f1D34469A4259 AND t."to" = 0x1601843c5E9bC251A3272907010AFa41Fa18347E))
-          AND DATE(evt_block_date) >= date '2024-10-02'
-        GROUP BY DATE(evt_block_date)
-    ),
-    
-    aave_seq AS (
-        SELECT dt
-        FROM unnest(sequence(date '2024-10-02', current_date, interval '1' day)) as t(dt)
-    ),
-    
-    aave_balances AS (
-        SELECT 
-            s.dt,
-            'ethereum' as blockchain,
-            'AAVE aETHUSDS' as protocol_name,
-            'USDS' as token_symbol,
-            'AR' as reward_code,
-            'BR' as interest_code,
-            COALESCE(SUM(at.usds_change) OVER (ORDER BY s.dt), 0) as amount
-        FROM aave_seq s
-        LEFT JOIN aave_transfers at ON at.dt = s.dt
-    ),
-    
-    ----------------------------------------------------------------
     -- CURVE CALCULATION - FIXED TO AVOID DUPLICATES
     ----------------------------------------------------------------
     -- Aggregate all Curve-related changes by day
@@ -346,18 +305,6 @@ with
             token_symbol,
             IF(amount > 1e-6, amount, 0) as amount
         FROM curve_balances
-        
-        UNION ALL
-        
-        SELECT 
-            dt,
-            blockchain,
-            reward_code,
-            interest_code,
-            protocol_name,
-            token_symbol,
-            IF(amount > 1e-6, amount, 0) as amount
-        FROM aave_balances
     ),
     
     ----------------------------------------------------------------
