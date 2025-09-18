@@ -176,41 +176,159 @@ with
     -- Standard protocol balance tracking for codes 1,2,4
     ----------------------------------------------------------------
     protocol_balances as (
-        select
-            tr.blockchain,
+        -- Ethereum transfers
+        SELECT
+            'ethereum' as blockchain,
             tt.token_addr,
-            tr.block_date as dt,
+            DATE(tr.evt_block_date) as dt,
             tr."to" as protocol_addr,
-            tr.amount_raw / power(10, tt.decimals) as amount
-        from tokens.transfers tr
-        join token_targets tt
-            on tr.blockchain = tt.blockchain
-            and tr.contract_address = tt.token_addr
-        join spark_targets st
-            on tr.blockchain = st.blockchain
-            and tr."to" = st.protocol_addr
-        where date(tr.block_date) >= tt.start_date
-          and tt.token_symbol in ('sUSDS', 'USDS', 'USDC', 'USDT', 'PYUSD')
-          and st.code in (1, 2, 4)
+            CAST(tr.value AS DOUBLE) / POWER(10, tt.decimals) as amount
+        FROM erc20_ethereum.evt_Transfer tr
+        JOIN token_targets tt
+            ON tt.blockchain = 'ethereum'
+            AND tr.contract_address = tt.token_addr
+        JOIN spark_targets st
+            ON st.blockchain = 'ethereum'
+            AND tr."to" = st.protocol_addr
+        WHERE DATE(tr.evt_block_date) >= tt.start_date
+          AND tt.token_symbol IN ('sUSDS', 'USDS', 'USDC', 'USDT', 'PYUSD')
+          AND st.code IN (1, 2, 4)
         
-        union all
+        UNION ALL
         
-        select
-            tr.blockchain,
+        SELECT
+            'ethereum' as blockchain,
             tt.token_addr,
-            tr.block_date as dt,
+            DATE(tr.evt_block_date) as dt,
             tr."from" as protocol_addr,
-            -tr.amount_raw / power(10, tt.decimals) as amount
-        from tokens.transfers tr
-        join token_targets tt
-            on tr.blockchain = tt.blockchain
-            and tr.contract_address = tt.token_addr
-        join spark_targets st
-            on tr.blockchain = st.blockchain
-            and tr."from" = st.protocol_addr
-        where date(tr.block_date) >= tt.start_date
-          and tt.token_symbol in ('sUSDS', 'USDS', 'USDC', 'USDT', 'PYUSD')
-          and st.code in (1, 2, 4)
+            -CAST(tr.value AS DOUBLE) / POWER(10, tt.decimals) as amount
+        FROM erc20_ethereum.evt_Transfer tr
+        JOIN token_targets tt
+            ON tt.blockchain = 'ethereum'
+            AND tr.contract_address = tt.token_addr
+        JOIN spark_targets st
+            ON st.blockchain = 'ethereum'
+            AND tr."from" = st.protocol_addr
+        WHERE DATE(tr.evt_block_date) >= tt.start_date
+          AND tt.token_symbol IN ('sUSDS', 'USDS', 'USDC', 'USDT', 'PYUSD')
+          AND st.code IN (1, 2, 4)
+        
+        UNION ALL
+        
+        -- Base transfers
+        SELECT
+            'base' as blockchain,
+            tt.token_addr,
+            DATE(tr.evt_block_time) as dt,
+            tr."to" as protocol_addr,
+            CAST(tr.value AS DOUBLE) / POWER(10, tt.decimals) as amount
+        FROM erc20_base.evt_Transfer tr
+        JOIN token_targets tt
+            ON tt.blockchain = 'base'
+            AND tr.contract_address = tt.token_addr
+        JOIN spark_targets st
+            ON st.blockchain = 'base'
+            AND tr."to" = st.protocol_addr
+        WHERE DATE(tr.evt_block_time) >= tt.start_date
+          AND tt.token_symbol IN ('sUSDS', 'USDS', 'USDC', 'USDT', 'PYUSD')
+          AND st.code IN (1, 2, 4)
+        
+        UNION ALL
+        
+        SELECT
+            'base' as blockchain,
+            tt.token_addr,
+            DATE(tr.evt_block_time) as dt,
+            tr."from" as protocol_addr,
+            -CAST(tr.value AS DOUBLE) / POWER(10, tt.decimals) as amount
+        FROM erc20_base.evt_Transfer tr
+        JOIN token_targets tt
+            ON tt.blockchain = 'base'
+            AND tr.contract_address = tt.token_addr
+        JOIN spark_targets st
+            ON st.blockchain = 'base'
+            AND tr."from" = st.protocol_addr
+        WHERE DATE(tr.evt_block_time) >= tt.start_date
+          AND tt.token_symbol IN ('sUSDS', 'USDS', 'USDC', 'USDT', 'PYUSD')
+          AND st.code IN (1, 2, 4)
+        
+        UNION ALL
+        
+        -- Arbitrum transfers
+        SELECT
+            'arbitrum' as blockchain,
+            tt.token_addr,
+            DATE(tr.evt_block_time) as dt,
+            tr."to" as protocol_addr,
+            CAST(tr.value AS DOUBLE) / POWER(10, tt.decimals) as amount
+        FROM erc20_arbitrum.evt_Transfer tr
+        JOIN token_targets tt
+            ON tt.blockchain = 'arbitrum'
+            AND tr.contract_address = tt.token_addr
+        JOIN spark_targets st
+            ON st.blockchain = 'arbitrum'
+            AND tr."to" = st.protocol_addr
+        WHERE DATE(tr.evt_block_time) >= tt.start_date
+          AND tt.token_symbol IN ('sUSDS', 'USDS', 'USDC', 'USDT', 'PYUSD')
+          AND st.code IN (1, 2, 4)
+        
+        UNION ALL
+        
+        SELECT
+            'arbitrum' as blockchain,
+            tt.token_addr,
+            DATE(tr.evt_block_time) as dt,
+            tr."from" as protocol_addr,
+            -CAST(tr.value AS DOUBLE) / POWER(10, tt.decimals) as amount
+        FROM erc20_arbitrum.evt_Transfer tr
+        JOIN token_targets tt
+            ON tt.blockchain = 'arbitrum'
+            AND tr.contract_address = tt.token_addr
+        JOIN spark_targets st
+            ON st.blockchain = 'arbitrum'
+            AND tr."from" = st.protocol_addr
+        WHERE DATE(tr.evt_block_time) >= tt.start_date
+          AND tt.token_symbol IN ('sUSDS', 'USDS', 'USDC', 'USDT', 'PYUSD')
+          AND st.code IN (1, 2, 4)
+        
+        UNION ALL
+        
+        -- Optimism transfers
+        SELECT
+            'optimism' as blockchain,
+            tt.token_addr,
+            DATE(tr.evt_block_time) as dt,
+            tr."to" as protocol_addr,
+            CAST(tr.value AS DOUBLE) / POWER(10, tt.decimals) as amount
+        FROM erc20_optimism.evt_Transfer tr
+        JOIN token_targets tt
+            ON tt.blockchain = 'optimism'
+            AND tr.contract_address = tt.token_addr
+        JOIN spark_targets st
+            ON st.blockchain = 'optimism'
+            AND tr."to" = st.protocol_addr
+        WHERE DATE(tr.evt_block_time) >= tt.start_date
+          AND tt.token_symbol IN ('sUSDS', 'USDS', 'USDC', 'USDT', 'PYUSD')
+          AND st.code IN (1, 2, 4)
+        
+        UNION ALL
+        
+        SELECT
+            'optimism' as blockchain,
+            tt.token_addr,
+            DATE(tr.evt_block_time) as dt,
+            tr."from" as protocol_addr,
+            -CAST(tr.value AS DOUBLE) / POWER(10, tt.decimals) as amount
+        FROM erc20_optimism.evt_Transfer tr
+        JOIN token_targets tt
+            ON tt.blockchain = 'optimism'
+            AND tr.contract_address = tt.token_addr
+        JOIN spark_targets st
+            ON st.blockchain = 'optimism'
+            AND tr."from" = st.protocol_addr
+        WHERE DATE(tr.evt_block_time) >= tt.start_date
+          AND tt.token_symbol IN ('sUSDS', 'USDS', 'USDC', 'USDT', 'PYUSD')
+          AND st.code IN (1, 2, 4)
     ),
     
     ----------------------------------------------------------------
