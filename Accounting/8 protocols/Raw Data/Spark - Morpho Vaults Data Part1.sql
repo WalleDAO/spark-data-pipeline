@@ -46,8 +46,8 @@ with
             t.decimals as token_decimals,
             18 as market_decimals    
         from vault_creation v
-        left join dune.steakhouse.result_token_info t
-            on v.token_address = t.token_address
+        left join tokens.erc20 t
+            on v.token_address = t.contract_address
             and v.blockchain = t.blockchain
     ),
     
@@ -152,22 +152,13 @@ SELECT
     spd.dt,
     spd.blockchain,
     spd.vault_address,
-    case when spd.vault_address=0x56a76b428244a50513ec81e225a293d128fd581d then 
-        coalesce(
-            last_value(vpf.performance_fee) ignore nulls over (
-                partition by spd.blockchain, spd.vault_address 
-                order by spd.dt 
-                rows between unbounded preceding and current row
-            ), 0.01
-        ) else 
-        coalesce(
+    coalesce(
             last_value(vpf.performance_fee) ignore nulls over (
                 partition by spd.blockchain, spd.vault_address 
                 order by spd.dt 
                 rows between unbounded preceding and current row
             ), 0
-        ) 
-    end as performance_fee,
+        )  as performance_fee,
     vd.token_symbol,
     spd.share_price as supply_index
 FROM share_price_daily spd
