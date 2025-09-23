@@ -12,18 +12,18 @@ with seq as (
 daily_staking_data as (
     select
         date(evt_block_time) as dt,
-        coalesce(sum(assets/1e18), 0) as daily_deposits
+        coalesce(sum(assets / 1e18), 0) as daily_deposits
     from ethena_labs_ethereum.StakedUSDeV2_evt_Deposit
-    where date(evt_block_time) >= date('2023-11-14')
+    where
+        date(evt_block_time) >= date('2023-11-14')
     group by 1
-    
     union all
-    
     select
         date(evt_block_time) as dt,
-        -coalesce(sum(assets/1e18), 0) as daily_deposits
+        - coalesce(sum(assets / 1e18), 0) as daily_deposits
     from ethena_labs_ethereum.StakedUSDeV2_evt_Withdraw
-    where date(evt_block_time) >= date('2023-11-14')
+    where
+        date(evt_block_time) >= date('2023-11-14')
     group by 1
 ),
 -- Aggregate daily net staking changes
@@ -54,8 +54,10 @@ daily_data as (
 -- Calculate cumulative staked USDe balance over time
 balances_cum as (
     select
-        s.dt,  
-        sum(coalesce(d.net_daily_staking, 0)) over (order by s.dt) as total_staked_usde
+        s.dt,
+        sum(coalesce(d.net_daily_staking, 0)) over (
+            order by s.dt
+        ) as total_staked_usde
     from seq s
     left join daily_net_staking d
         on s.dt = d.dt
@@ -67,19 +69,22 @@ susde_apy as (
         POWER(1 + weekly_avg_daily_rate * 7, 52) - 1 AS susde_apy,
         weekly_avg_daily_rate * 365 AS susde_apr
     from (
-        select
-            dt, 
-            avg(coalesce(daily_protocol_return, 0)) over (
-                order by dt rows between 6 preceding and current row
-            ) / nullif(
-                avg(total_staked_usde) over (
-                    order by dt rows between 6 preceding and current row
-                ),
-                0
-            ) as weekly_avg_daily_rate
-        from balances_cum b
-        left join daily_data d using (dt)
-    )
+            select
+                dt,
+                avg(coalesce(daily_protocol_return, 0)) over (
+                    order by dt rows between 6 preceding
+                        and current row
+                ) / nullif(
+                    avg(total_staked_usde) over (
+                        order by dt rows between 6 preceding
+                            and current row
+                    ),
+                    0
+                ) as weekly_avg_daily_rate
+            from balances_cum b
+            left join daily_data d
+                using (dt)
+        )
 ),
 -- Combine all data for Ethena protocol analysis
 ethena_payout as (
@@ -96,7 +101,12 @@ ethena_payout as (
         a.susde_apr - i.reward_per as interest_per,
         (usde_pay_value + payout_value) / 2 as actual_amount,
         (usde_value + susde_value + u_usde_value) / 2 as amount,
-        i.reward_per as BR_cost_per
+        i.reward_per as BR_cost_per,
+        usde_pay_value,
+        payout_value,
+        usde_value,
+        susde_value,
+        u_usde_value
     from seq s
     cross join query_5353955 i
     left join query_5163486 b
@@ -121,8 +131,7 @@ final_output as (
         ) as daily_actual_revenue,
         amount * BR_cost_per / 365 as daily_BR_cost
     from ethena_payout
-)
--- Final output with all metrics
+) -- Final output with all metrics
 select
     dt,
     blockchain,
@@ -137,6 +146,11 @@ select
     actual_amount,
     amount,
     daily_actual_revenue,
-    daily_BR_cost
+    daily_BR_cost,
+    usde_pay_value,
+    payout_value,
+    usde_value,
+    susde_value,
+    u_usde_value
 from final_output
 order by dt desc;
