@@ -73,8 +73,7 @@ with
         )
         left join ref_codes r on case when tt.symbol='sUSDC' and  b.ref_code=-999999 then 127 
             when tt.symbol='sUSDS' and b.ref_code=-999999 then 99 else b.ref_code end  = r.ref_code
-        where b.ref_code is not null
-          and b.ref_code not in (100, 101) 
+        where b.ref_code not in (100, 101) 
         group by 1,2,3,4,5,6
     )
 
