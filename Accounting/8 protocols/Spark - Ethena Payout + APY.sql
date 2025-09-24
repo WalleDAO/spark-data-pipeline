@@ -109,16 +109,18 @@ select
         ) + usde_value + susde_value + u_usde_value
     ) / 2 as amount,
     (daily_usde_pay_value + daily_payout_value) / 2 as daily_actual_revenue,
-    usde_value + susde_value + u_usde_value -(
-        sum(
-            case
-                when dt >= date '2025-09-16'
-                    then coalesce(usde_withdrawal_value, 0)
-                else 0
-            end
-        ) over (
-            order by dt
-        ) + usde_value + susde_value + u_usde_value
+    (
+        usde_value + susde_value + u_usde_value -(
+            sum(
+                case
+                    when dt >= date '2025-09-16'
+                        then coalesce(usde_withdrawal_value, 0)
+                    else 0
+                end
+            ) over (
+                order by dt
+            ) + usde_value + susde_value + u_usde_value
+        )
     ) / 2 / 365 * i.reward_per as daily_BR_cost,
     usde_value,
     usde_withdrawal_value,
