@@ -99,13 +99,45 @@ select
     a.susde_apr - i.reward_per as interest_per,
     (usde_value + susde_value + u_usde_value) / 2 as amount,
     (daily_usde_pay_value + daily_payout_value) / 2 as daily_actual_revenue,
-    (usde_value + susde_value + u_usde_value)  / 2 / 365 * i.reward_per as daily_BR_cost,
+    (usde_value + susde_value + u_usde_value) / 2 / 365 * i.reward_per as daily_BR_cost,
     usde_value,
     usde_withdrawal_value,
     susde_value,
     u_usde_value,
     daily_usde_pay_value,
-    daily_payout_value
+    daily_payout_value,
+    usde_value + susde_value + u_usde_value as total_holdings,
+    sum(
+        case
+            when dt >= date '2025-09-16'
+                then coalesce(usde_withdrawal_value, 0)
+            else 0
+        end
+    ) over (
+        order by dt
+    ) as spark_cumulative_withdrawal,
+    (
+        sum(
+            case
+                when dt >= date '2025-09-16'
+                    then coalesce(usde_withdrawal_value, 0)
+                else 0
+            end
+        ) over (
+            order by dt
+        ) + usde_value + susde_value + u_usde_value
+    ) / 2 as grove_holdings,
+    usde_value + susde_value + u_usde_value -(
+        sum(
+            case
+                when dt >= date '2025-09-16'
+                    then coalesce(usde_withdrawal_value, 0)
+                else 0
+            end
+        ) over (
+            order by dt
+        ) + usde_value + susde_value + u_usde_value
+    ) / 2 as spark_holdings
 from seq s
 cross join query_5353955 i
 left join query_5163486 b
