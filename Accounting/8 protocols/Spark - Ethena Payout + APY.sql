@@ -159,7 +159,20 @@ select
         ) over (
             order by dt
         ) + usde_value + susde_value + u_usde_value
-    ) / 2 as spark_holdings
+    ) / 2 as spark_holdings,
+    (
+        usde_value + susde_value + u_usde_value -(
+            sum(
+                case
+                    when dt >= date '2025-09-16'
+                        then coalesce(usde_withdrawal_value, 0)
+                    else 0
+                end
+            ) over (
+                order by dt
+            ) + usde_value + susde_value + u_usde_value
+        ) / 2
+    ) /(usde_value + susde_value + u_usde_value) as spark_share
 from seq s
 cross join query_5353955 i
 left join query_5163486 b
