@@ -218,10 +218,10 @@ with
                 when b.supply_amount > 0 then (b.alm_supply_amount / b.supply_amount)
                 else 0 
             end as alm_share,
-            r.reward_code,
-            r.reward_per,
-            i.reward_code as interest_code,
-            -i.reward_per as interest_per,
+            r.reward_code as gross_yield_code,
+            r.reward_per as gross_yield_apr,
+            i.reward_code as borrow_cost_code,
+            i.reward_per as borrow_cost_apr,
             case 
                 when b.supply_amount > 0 then (b.idle_amount * (b.alm_supply_amount / b.supply_amount))
                 else 0 
