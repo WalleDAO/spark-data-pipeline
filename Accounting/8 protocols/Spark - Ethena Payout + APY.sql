@@ -109,7 +109,6 @@ main_data as (
                 order by dt
             ) + usde_value + susde_value + u_usde_value
         ) / 2 as amount,
-        (daily_usde_pay_value + daily_payout_value) / 2 as daily_actual_revenue,
         (
             usde_value + susde_value + u_usde_value -(
                 sum(
@@ -218,9 +217,44 @@ spark_share_avg as (
     group by p1.dt
 )
 select
-    m.*,
+    m.dt,
+    m.blockchain,
+    m.protocol_name,
+    m.token_symbol,
+    m.reward_code,
+    m.reward_per,
+    m.susde_apy,
+    m.susde_apr,
+    m.interest_code,
+    m.interest_per,
+    if(m.amount > 0, m.amount, 0) as amount,
+    case
+        when coalesce(s.avg_spark_share, 0) < 0
+            then 0
+        when dt >= date '2025-09-16'
+            then daily_usde_pay_value * coalesce(s.avg_spark_share, 0)
+        else daily_usde_pay_value / 2
+    end + if(
+        spark_share > 0,
+        daily_payout_value * spark_share,
+        0
+    ) as daily_actual_revenue,
+    if(m.daily_BR_cost > 0, daily_BR_cost, 0) as daily_BR_cost,
+    m.usde_value,
+    m.usde_withdrawal_value,
+    m.susde_value,
+    m.u_usde_value,
+    m.daily_usde_pay_value,
+    m.daily_payout_value,
+    m.total_holdings,
+    m.spark_cumulative_withdrawal,
+    m.grove_holdings,
+    m.spark_holdings,
+    m.spark_share,
     s.avg_spark_share as daily_usde_pay_value_spark_share
 from main_data m
 left join spark_share_avg s
     on m.dt = s.payout_date
+where
+    m.dt >= date '2025-01-13'
 order by dt desc
