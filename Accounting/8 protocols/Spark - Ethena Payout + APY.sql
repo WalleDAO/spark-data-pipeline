@@ -85,72 +85,36 @@ susde_apy as (
             left join daily_data d
                 using (dt)
         )
-),
--- Combine all data for Ethena protocol analysis
-ethena_payout as (
-    select
-        dt,
-        'ethereum' as blockchain,
-        'ethena' as protocol_name,
-        'USDe' as token_symbol,
-        'NA' as reward_code,
-        0 as reward_per,
-        'APR-BR' as interest_code,
-        a.susde_apy,
-        a.susde_apr,
-        a.susde_apr - i.reward_per as interest_per,
-        (usde_pay_value + payout_value) / 2 as actual_amount,
-        (usde_value + susde_value + u_usde_value) / 2 as amount,
-        i.reward_per as BR_cost_per,
-        usde_pay_value,
-        payout_value,
-        usde_value,
-        susde_value,
-        u_usde_value
-    from seq s
-    cross join query_5353955 i
-    left join query_5163486 b
-        using (dt)
-    left join susde_apy a
-        using (dt)
-    where
-        dt >= date '2024-10-23'
-        and i.reward_code = 'BR'
-        and dt between i.start_dt
-        and i.end_dt
-),
--- Calculate daily revenue and BR costs
-final_output as (
-    select
-        *,
-        coalesce(
-            actual_amount - lag(actual_amount) over (
-                order by dt
-            ),
-            0
-        ) as daily_actual_revenue,
-        amount * BR_cost_per / 365 as daily_BR_cost
-    from ethena_payout
-) -- Final output with all metrics
+)
 select
     dt,
-    blockchain,
-    protocol_name,
-    token_symbol,
-    reward_code,
-    reward_per,
-    susde_apy,
-    susde_apr,
-    interest_code,
-    interest_per,
-    actual_amount,
-    amount,
-    daily_actual_revenue,
-    daily_BR_cost,
-    usde_pay_value,
-    payout_value,
+    'ethereum' as blockchain,
+    'ethena' as protocol_name,
+    'USDe' as token_symbol,
+    i.reward_code,
+    i.reward_per,
+    a.susde_apy,
+    a.susde_apr,
+    'APR-BR' as interest_code,
+    a.susde_apr - i.reward_per as interest_per,
+    (usde_value + susde_value + u_usde_value) / 2 as amount,
+    (daily_usde_pay_value + daily_payout_value) / 2 as daily_actual_revenue,
+    (usde_value + susde_value + u_usde_value)  / 2 / 365 * i.reward_per as daily_BR_cost,
     usde_value,
+    usde_withdrawal_value,
     susde_value,
-    u_usde_value
-from final_output
-order by dt desc;
+    u_usde_value,
+    daily_usde_pay_value,
+    daily_payout_value
+from seq s
+cross join query_5353955 i
+left join query_5163486 b
+    using (dt)
+left join susde_apy a
+    using (dt)
+where
+    dt >= date '2024-10-23'
+    and i.reward_code = 'BR'
+    and dt between i.start_dt
+    and i.end_dt
+order by dt desc
