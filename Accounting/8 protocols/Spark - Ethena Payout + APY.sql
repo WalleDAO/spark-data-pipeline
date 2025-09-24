@@ -85,103 +85,142 @@ susde_apy as (
             left join daily_data d
                 using (dt)
         )
+),
+main_data as (
+    select
+        dt,
+        'ethereum' as blockchain,
+        'ethena' as protocol_name,
+        'USDe' as token_symbol,
+        i.reward_code,
+        i.reward_per,
+        a.susde_apy,
+        a.susde_apr,
+        'APR-BR' as interest_code,
+        a.susde_apr - i.reward_per as interest_per,
+        usde_value + susde_value + u_usde_value -(
+            sum(
+                case
+                    when dt >= date '2025-09-16'
+                        then coalesce(usde_withdrawal_value, 0)
+                    else 0
+                end
+            ) over (
+                order by dt
+            ) + usde_value + susde_value + u_usde_value
+        ) / 2 as amount,
+        (daily_usde_pay_value + daily_payout_value) / 2 as daily_actual_revenue,
+        (
+            usde_value + susde_value + u_usde_value -(
+                sum(
+                    case
+                        when dt >= date '2025-09-16'
+                            then coalesce(usde_withdrawal_value, 0)
+                        else 0
+                    end
+                ) over (
+                    order by dt
+                ) + usde_value + susde_value + u_usde_value
+            ) / 2
+        ) / 365 * i.reward_per as daily_BR_cost,
+        usde_value,
+        usde_withdrawal_value,
+        susde_value,
+        u_usde_value,
+        daily_usde_pay_value,
+        daily_payout_value,
+        usde_value + susde_value + u_usde_value as total_holdings,
+        sum(
+            case
+                when dt >= date '2025-09-16'
+                    then coalesce(usde_withdrawal_value, 0)
+                else 0
+            end
+        ) over (
+            order by dt
+        ) as spark_cumulative_withdrawal,
+        (
+            sum(
+                case
+                    when dt >= date '2025-09-16'
+                        then coalesce(usde_withdrawal_value, 0)
+                    else 0
+                end
+            ) over (
+                order by dt
+            ) + usde_value + susde_value + u_usde_value
+        ) / 2 as grove_holdings,
+        usde_value + susde_value + u_usde_value -(
+            sum(
+                case
+                    when dt >= date '2025-09-16'
+                        then coalesce(usde_withdrawal_value, 0)
+                    else 0
+                end
+            ) over (
+                order by dt
+            ) + usde_value + susde_value + u_usde_value
+        ) / 2 as spark_holdings,
+        (
+            usde_value + susde_value + u_usde_value -(
+                sum(
+                    case
+                        when dt >= date '2025-09-16'
+                            then coalesce(usde_withdrawal_value, 0)
+                        else 0
+                    end
+                ) over (
+                    order by dt
+                ) + usde_value + susde_value + u_usde_value
+            ) / 2
+        ) /(usde_value + susde_value + u_usde_value) as spark_share
+    from seq s
+    cross join query_5353955 i
+    left join query_5163486 b
+        using (dt)
+    left join susde_apy a
+        using (dt)
+    where
+        dt >= date '2024-10-23'
+        and i.reward_code = 'BR'
+        and dt between i.start_dt
+        and i.end_dt
+),
+payout_dates as (
+    select
+        dt,
+        daily_usde_pay_value,
+        spark_share,
+        case
+            when daily_usde_pay_value > 0
+                then dt
+        end as payout_date,
+        lag(
+            case
+                when daily_usde_pay_value > 0
+                    then dt
+            end
+        ) ignore nulls over (
+            order by dt
+        ) as prev_payout_date
+    from main_data
+),
+spark_share_avg as (
+    select
+        p1.dt as payout_date,
+        avg(p2.spark_share) as avg_spark_share
+    from payout_dates p1
+    join payout_dates p2
+        on p2.dt > coalesce(p1.prev_payout_date, date '1900-01-01')
+        and p2.dt <= p1.dt
+    where
+        p1.daily_usde_pay_value > 0
+    group by p1.dt
 )
 select
-    dt,
-    'ethereum' as blockchain,
-    'ethena' as protocol_name,
-    'USDe' as token_symbol,
-    i.reward_code,
-    i.reward_per,
-    a.susde_apy,
-    a.susde_apr,
-    'APR-BR' as interest_code,
-    a.susde_apr - i.reward_per as interest_per,
-    usde_value + susde_value + u_usde_value -(
-        sum(
-            case
-                when dt >= date '2025-09-16'
-                    then coalesce(usde_withdrawal_value, 0)
-                else 0
-            end
-        ) over (
-            order by dt
-        ) + usde_value + susde_value + u_usde_value
-    ) / 2 as amount,
-    (daily_usde_pay_value + daily_payout_value) / 2 as daily_actual_revenue,
-    (
-        usde_value + susde_value + u_usde_value -(
-            sum(
-                case
-                    when dt >= date '2025-09-16'
-                        then coalesce(usde_withdrawal_value, 0)
-                    else 0
-                end
-            ) over (
-                order by dt
-            ) + usde_value + susde_value + u_usde_value
-        ) / 2
-    ) / 365 * i.reward_per as daily_BR_cost,
-    usde_value,
-    usde_withdrawal_value,
-    susde_value,
-    u_usde_value,
-    daily_usde_pay_value,
-    daily_payout_value,
-    usde_value + susde_value + u_usde_value as total_holdings,
-    sum(
-        case
-            when dt >= date '2025-09-16'
-                then coalesce(usde_withdrawal_value, 0)
-            else 0
-        end
-    ) over (
-        order by dt
-    ) as spark_cumulative_withdrawal,
-    (
-        sum(
-            case
-                when dt >= date '2025-09-16'
-                    then coalesce(usde_withdrawal_value, 0)
-                else 0
-            end
-        ) over (
-            order by dt
-        ) + usde_value + susde_value + u_usde_value
-    ) / 2 as grove_holdings,
-    usde_value + susde_value + u_usde_value -(
-        sum(
-            case
-                when dt >= date '2025-09-16'
-                    then coalesce(usde_withdrawal_value, 0)
-                else 0
-            end
-        ) over (
-            order by dt
-        ) + usde_value + susde_value + u_usde_value
-    ) / 2 as spark_holdings,
-    (
-        usde_value + susde_value + u_usde_value -(
-            sum(
-                case
-                    when dt >= date '2025-09-16'
-                        then coalesce(usde_withdrawal_value, 0)
-                    else 0
-                end
-            ) over (
-                order by dt
-            ) + usde_value + susde_value + u_usde_value
-        ) / 2
-    ) /(usde_value + susde_value + u_usde_value) as spark_share
-from seq s
-cross join query_5353955 i
-left join query_5163486 b
-    using (dt)
-left join susde_apy a
-    using (dt)
-where
-    dt >= date '2024-10-23'
-    and i.reward_code = 'BR'
-    and dt between i.start_dt
-    and i.end_dt
+    m.*,
+    s.avg_spark_share as daily_usde_pay_value_spark_share
+from main_data m
+left join spark_share_avg s
+    on m.dt = s.payout_date
 order by dt desc
