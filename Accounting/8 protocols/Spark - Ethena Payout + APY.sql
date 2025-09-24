@@ -120,8 +120,8 @@ select
             ) over (
                 order by dt
             ) + usde_value + susde_value + u_usde_value
-        )
-    ) / 2 / 365 * i.reward_per as daily_BR_cost,
+        ) / 2
+    ) / 365 * i.reward_per as daily_BR_cost,
     usde_value,
     usde_withdrawal_value,
     susde_value,
