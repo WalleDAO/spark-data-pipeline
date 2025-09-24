@@ -121,7 +121,7 @@ balance_ssl_cum as (
         dt,
         symbol,
         case
-            when symbol = 'USDe_withdrawal'
+            when symbol in ('USDe_withdrawal','USDe_pay')
                 then coalesce(b.amount, 0)
             else sum(coalesce(b.amount, 0)) over (
                 partition by symbol
@@ -206,16 +206,11 @@ select
     p.susde_yield,
     b.usde_amount as usde_value,
     b.USDe_withdrawal_amount as usde_withdrawal_value,
-    b.usde_pay_amount as usde_pay_value,
     b.susde_amount * p.susde_price as susde_value,
     b.u_usde_amount as u_usde_value,
-    coalesce(
-        b.usde_pay_amount - lag(b.usde_pay_amount) over (
-            order by dt
-        ),
-        0
-    ) as daily_usde_pay_value,
+    b.usde_pay_amount as daily_usde_pay_value,
     b.susde_amount * p.susde_price * coalesce(p.susde_yield, 0) as daily_payout_value
 from balance_ssl_pivot_clean b
 left join susde_price_usd p
     using (dt)
+order by dt desc
