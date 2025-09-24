@@ -140,10 +140,10 @@ balance_ssl_pivot as (
 balance_ssl_pivot_clean as (
     select
         dt,
-        if(usde_amount > 1e-6, usde_amount, 0) as usde_amount,
-        if(usde_pay_amount > 1e-6, usde_pay_amount, 0) as usde_pay_amount,
-        if(susde_amount > 1e-6, susde_amount, 0) as susde_amount,
-        if(u_usde_amount > 1e-6, u_usde_amount, 0) as u_usde_amount
+        if(usde_amount > 1e -6, usde_amount, 0) as usde_amount,
+        if(usde_pay_amount > 1e -6, usde_pay_amount, 0) as usde_pay_amount,
+        if(susde_amount > 1e -6, susde_amount, 0) as susde_amount,
+        if(u_usde_amount > 1e -6, u_usde_amount, 0) as u_usde_amount
     from balance_ssl_pivot
 ),
 susde as (
@@ -165,7 +165,8 @@ susde as (
                 shares
             from ethena_labs_ethereum.stakedusdev2_evt_deposit
             where
-                shares > 1 and assets > 1
+                shares > 1
+                and assets > 1
             union all
             select
                 evt_block_time as dt,
@@ -173,7 +174,8 @@ susde as (
                 shares
             from ethena_labs_ethereum.stakedusdev2_evt_withdraw
             where
-                shares > 1 and assets > 1
+                shares > 1
+                and assets > 1
         )
     group by 1
 ),
