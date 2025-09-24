@@ -347,8 +347,8 @@ with
             s.idle_amount,
             s.alm_share,
             s.alm_idle,
-            s.reward_code,
-            s.reward_per,
+            s.reward_code as borrow_cost_code,
+            s.reward_per as borrow_cost_apr,
             rf.reserve_factor,
             s.sofr,
             -- Use APR rates for interest calculations
