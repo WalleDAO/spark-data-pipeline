@@ -100,6 +100,7 @@ main_data as (
             sum(
                 case
                     when dt >= date '2025-09-16'
+                    and dt <= date '2025-09-24'
                         then coalesce(usde_withdrawal_value, 0)
                     else 0
                 end
@@ -112,6 +113,7 @@ main_data as (
                 sum(
                     case
                         when dt >= date '2025-09-16'
+                        and dt <= date '2025-09-24'
                             then coalesce(usde_withdrawal_value, 0)
                         else 0
                     end
@@ -130,6 +132,7 @@ main_data as (
         sum(
             case
                 when dt >= date '2025-09-16'
+                and dt <= date '2025-09-24'
                     then coalesce(usde_withdrawal_value, 0)
                 else 0
             end
@@ -140,6 +143,7 @@ main_data as (
             sum(
                 case
                     when dt >= date '2025-09-16'
+                    and dt <= date '2025-09-24'
                         then coalesce(usde_withdrawal_value, 0)
                     else 0
                 end
@@ -151,6 +155,7 @@ main_data as (
             sum(
                 case
                     when dt >= date '2025-09-16'
+                    and dt <= date '2025-09-24'
                         then coalesce(usde_withdrawal_value, 0)
                     else 0
                 end
@@ -163,6 +168,7 @@ main_data as (
                 sum(
                     case
                         when dt >= date '2025-09-16'
+                        and dt <= date '2025-09-24'
                             then coalesce(usde_withdrawal_value, 0)
                         else 0
                     end
@@ -205,7 +211,7 @@ payout_dates as (
 spark_share_avg as (
     select
         p1.dt as payout_date,
-        avg(p2.spark_share) as avg_spark_share
+        avg(if(p2.spark_share > 0, p2.spark_share, 0)) as avg_spark_share
     from payout_dates p1
     join payout_dates p2
         on p2.dt > coalesce(p1.prev_payout_date, date '1900-01-01')
@@ -225,8 +231,6 @@ select
     m.susde_apr,
     if(m.amount > 0, m.amount, 0) as amount,
     case
-        when coalesce(s.avg_spark_share, 0) < 0
-            then 0
         when dt >= date '2025-09-16'
             then daily_usde_pay_value * coalesce(s.avg_spark_share, 0)
         else daily_usde_pay_value / 2
@@ -245,8 +249,8 @@ select
     m.total_holdings,
     m.spark_cumulative_withdrawal,
     m.grove_holdings,
-    m.spark_holdings,
-    m.spark_share,
+    if(m.spark_holdings > 0, m.spark_holdings, 0) as spark_holdings,
+    if(m.spark_share > 0, m.spark_share, 0) as spark_share,
     s.avg_spark_share as daily_usde_pay_value_spark_share
 from main_data m
 left join spark_share_avg s
