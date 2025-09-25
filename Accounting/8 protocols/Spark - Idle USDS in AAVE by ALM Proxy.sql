@@ -4,7 +4,6 @@ with
         ('ethereum', 'aToken', 'USDS', 0x09AA30b182488f769a9824F15E6Ce58591Da4781, 18, date '2024-10-02'),   -- aEthLidoUSDS
         ('ethereum', 'debtToken', 'USDS', 0x2D9fe18b6c35FE439cC15D932cc5C943bf2d901E, 18, date '2024-10-02') -- variable Debt EthLidoUSDS
     ),
-    -- get total supply and borrow amounts
     sp_transfers_totals as (
         select
             dt,
