@@ -33,7 +33,6 @@ with
         select * from spark_tokens
     ),
     
-    -- Reserve factor configuration
     sparklend_reserve_factor as (
         with latest_reserve_factors as (
             select 
