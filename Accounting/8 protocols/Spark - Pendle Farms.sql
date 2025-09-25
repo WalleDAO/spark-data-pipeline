@@ -66,20 +66,14 @@ with
             'ethereum' as blockchain,
             'Pendle' as protocol_name,
             b.symbol as token_symbol,
-            if(b.symbol = 'SY-USDS', concat(r.reward_code, '*'), r.reward_code) as reward_code,
+            if(b.symbol = 'SY-USDS', concat(r.reward_code, '*'), r.reward_code) as gross_yield_code,
             -- Pendle USDS points -> deduct 40bps using APR conversion
-            -- Convert 0.2% APY to APR: 365 * (exp(ln(1 + 0.002) / 365) - 1)
-            if(b.symbol = 'SY-USDS', 365 * (exp(ln(1 + 0.002) / 365) - 1), r.reward_per) as reward_per,
-            i.reward_code as interest_code,
-            i.reward_per as interest_per,
+            if(b.symbol = 'SY-USDS', 365 * (exp(ln(1 + 0.002) / 365) - 1), r.reward_per) as gross_yield_apr,
             amount as amount
         from supply_cum b
         cross join query_5353955 r-- Spark - Accessibility Rewards - Rates -> rebates (now APR)
-        cross join query_5353955 i-- Spark - Accessibility Rewards - Rates -> interest (now APR)
         where r.reward_code = 'XR'
           and b.dt between r.start_dt and r.end_dt
-          and i.reward_code = 'NA'
-          and b.dt between i.start_dt and i.end_dt
     )
 
 select * from supply_rates order by dt desc
