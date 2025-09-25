@@ -221,12 +221,10 @@ select
     m.blockchain,
     m.protocol_name,
     m.token_symbol,
-    m.reward_code,
-    m.reward_per,
+    m.reward_code as borrow_cost_code,
+    m.reward_per as borrow_cost_apr,
     m.susde_apy,
     m.susde_apr,
-    m.interest_code,
-    m.interest_per,
     if(m.amount > 0, m.amount, 0) as amount,
     case
         when coalesce(s.avg_spark_share, 0) < 0
