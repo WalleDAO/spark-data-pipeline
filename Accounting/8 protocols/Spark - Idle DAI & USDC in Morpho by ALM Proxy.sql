@@ -238,7 +238,7 @@ vault_balances_rates as (
         supply_rate,
         borrow_rate,
         i.reward_code as borrow_cost_code,
-        i.reward_per as borrow_cost_per,
+        i.reward_per as borrow_cost_apr,
         b.performance_fee
     from vault_balances b
     cross join query_5353955 i
@@ -258,9 +258,9 @@ vault_balances_interest as (
         end as interest_amount,
         case
             when token_symbol in ('USDS', 'DAI')
-                then alm_borrow_amount * borrow_cost_per
+                then alm_borrow_amount * borrow_cost_apr
             when token_symbol in ('USDC')
-                then alm_supply_amount * borrow_cost_per
+                then alm_supply_amount * borrow_cost_apr
         end as BR_cost
     from vault_balances_rates
 )
