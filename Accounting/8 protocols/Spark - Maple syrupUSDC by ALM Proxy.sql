@@ -134,7 +134,7 @@ syrup_rates as (
         'USDC' as token_symbol,
         amount,
         i.reward_code as borrow_cost_code,
-        i.reward_per as borrow_cost_per,
+        i.reward_per as borrow_cost_apr,
         apr_7d,
         apr_30d,
         apr_90d
