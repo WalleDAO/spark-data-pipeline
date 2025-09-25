@@ -96,8 +96,6 @@ main_data as (
         i.reward_per,
         a.susde_apy,
         a.susde_apr,
-        'APR-BR' as interest_code,
-        a.susde_apr - i.reward_per as interest_per,
         usde_value + susde_value + u_usde_value -(
             sum(
                 case
