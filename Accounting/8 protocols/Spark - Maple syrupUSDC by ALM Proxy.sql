@@ -133,10 +133,8 @@ syrup_rates as (
         'Maple' as protocol_name,
         'USDC' as token_symbol,
         amount,
-        i.reward_code,
-        i.reward_per as reward_per,
-        'APR-BR' as interest_code,
-        apr_90d - i.reward_per as interest_per,
+        i.reward_code as borrow_cost_code,
+        i.reward_per as borrow_cost_per,
         apr_7d,
         apr_30d,
         apr_90d
