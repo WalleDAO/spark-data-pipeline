@@ -145,7 +145,6 @@ syrup_rates as (
         and dt between i.start_dt
         and i.end_dt
 )
-select
-    *
+select *
 from syrup_rates
 order by 1 desc
