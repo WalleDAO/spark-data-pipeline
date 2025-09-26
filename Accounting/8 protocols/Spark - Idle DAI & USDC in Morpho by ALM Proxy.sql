@@ -264,7 +264,6 @@ vault_balances_interest as (
         end as BR_cost
     from vault_balances_rates
 )
-select
-    *
+select *
 from vault_balances_interest
 order by dt desc
