@@ -153,7 +153,6 @@ with
         from (select symbol, min(dt) as start_dt from sp_transfers_totals group by 1) t
         cross join unnest(sequence(t.start_dt, current_date, interval '1' day)) as s(dt)
     ),
-    -- get cumulative balances
     sp_balances as (
         select
             dt,
