@@ -240,7 +240,7 @@ SELECT
             ) - 1
         ) * 365
         ELSE 0
-    END as supply_rate_apr,
+    END as supply_rate_apr_pool,
     if(
         COALESCE(SLL_allocated_assets_balance, 0) <= 0,
         0,
