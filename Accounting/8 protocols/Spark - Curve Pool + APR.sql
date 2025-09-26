@@ -254,7 +254,7 @@ SELECT
             ) * 365
             ELSE 0
         END * COALESCE(SLL_total_assets_balance, 0) / COALESCE(SLL_allocated_assets_balance, 0)
-    ) as supply_rate_apr_token2,
+    ) as supply_rate_apr_target_token,
     i.reward_code as borrow_cost_code,
     i.reward_per as borrow_cost_apr,
     COALESCE(SLL_total_assets_balance, 0) as SLL_total_assets_balance,
