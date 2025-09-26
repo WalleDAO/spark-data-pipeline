@@ -9,7 +9,6 @@ with
         ('ethereum', 0x0ee69a11b4391c5af5eb2fb088c2df5dd2a0d075, 'sy', 'SY-USDS-SPK', 18, date '2025-07-04')  -- sy
     ),
     transfers as (
-        -- SY tokens transferred TO LP pools (deposits)
         select
             tk."type",
             tr.contract_address,
