@@ -296,9 +296,9 @@ with
             b.protocol_name,
             b.token_symbol,
             b.gross_yield_code,
-            r.reward_per as gross_yield_per,
+            r.reward_per as gross_yield_apr,
             b.borrow_cost_code,
-            i.reward_per as borrow_cost_per,
+            i.reward_per as borrow_cost_apr,
             b.amount
         from protocol_balances_cum_filter b
         left join query_5353955 r
@@ -311,8 +311,5 @@ with
 
 select *
 from protocol_rates
-union all 
-SELECT * 
-from query_5713872
 order by dt desc, protocol_name asc, 
 blockchain asc, token_symbol asc
