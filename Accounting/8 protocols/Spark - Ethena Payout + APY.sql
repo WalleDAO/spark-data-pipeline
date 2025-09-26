@@ -26,7 +26,6 @@ daily_staking_data as (
         date(evt_block_time) >= date('2023-11-14')
     group by 1
 ),
--- Aggregate daily net staking changes
 daily_net_staking as (
     select
         dt,
