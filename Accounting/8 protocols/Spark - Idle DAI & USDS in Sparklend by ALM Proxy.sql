@@ -54,7 +54,7 @@ with
             token_symbol,
             reserve_factor
         from latest_reserve_factors
-        where rn = 1 -- Get the most recent reserve factor for each asset
+        where rn = 1 
     ),
     -- Calculate total supply and borrow amounts from token events
     sp_transfers_totals as (
