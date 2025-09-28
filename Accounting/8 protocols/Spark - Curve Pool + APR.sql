@@ -255,15 +255,23 @@ SELECT
             ELSE 0
         END * COALESCE(SLL_total_assets_balance, 0) / COALESCE(SLL_allocated_assets_balance, 0)
     ) as supply_rate_apr_target_token,
+    r.reward_code as rebate_yield_code,
+    r.reward_per as rebate_yield_apr,
     i.reward_code as borrow_cost_code,
     i.reward_per as borrow_cost_apr,
     COALESCE(SLL_total_assets_balance, 0) as SLL_total_assets_balance,
-    COALESCE(SLL_allocated_assets_balance, 0) as SLL_allocated_assets_balance
+    COALESCE(SLL_allocated_assets_balance, 0) as SLL_allocated_assets_balance,
+    COALESCE(SLL_total_assets_balance, 0) - COALESCE(SLL_allocated_assets_balance, 0) as alm_idle
 FROM main_data
 CROSS JOIN query_5353955 i
 WHERE
     i.reward_code = 'BR'
     AND dt BETWEEN i.start_dt
     AND i.end_dt
+CROSS JOIN query_5353955 r
+WHERE
+    r.reward_code = 'AR'
+    AND dt BETWEEN r.start_dt
+    AND r.end_dt
 ORDER BY dt DESC,
     pool_name
