@@ -241,20 +241,6 @@ SELECT
         ) * 365
         ELSE 0
     END as supply_rate_apr_pool,
-    if(
-        COALESCE(SLL_allocated_assets_balance, 0) <= 0,
-        0,
-        CASE
-            WHEN dt >= apr_start_date
-                THEN (
-                index_value / LAG(index_value, 1) OVER (
-                    PARTITION BY pool_name
-                    ORDER BY dt ASC
-                ) - 1
-            ) * 365
-            ELSE 0
-        END * COALESCE(SLL_total_assets_balance, 0) / COALESCE(SLL_allocated_assets_balance, 0)
-    ) as supply_rate_apr_target_token,
     case when token_symbol='PYUSD' then 365 * (exp(ln(1 + 0.045) / 365) - 1) else 0 end as paypal_yield_rate,
     r.reward_code as rebate_yield_code,
     r.reward_per as rebate_yield_apr,
