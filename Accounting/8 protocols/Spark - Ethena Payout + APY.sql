@@ -228,17 +228,31 @@ select
     m.reward_per as borrow_cost_apr,
     m.susde_apy,
     m.susde_apr,
-    if(m.amount > 0, m.amount, 0) as amount,
     case
+        when dt >= date '2025-09-24'
+            then 0
+        else if(m.amount > 0, m.amount, 0)
+    end as amount,
+    case
+        when dt >= date '2025-09-26'
+            then 0
         when dt >= date '2025-09-16'
             then daily_usde_pay_value * coalesce(s.avg_spark_share, 0)
         else daily_usde_pay_value / 2
-    end + if(
-        spark_share > 0,
-        daily_payout_value * spark_share,
-        0
-    ) as daily_actual_revenue,
-    if(m.daily_BR_cost > 0, daily_BR_cost, 0) as daily_BR_cost,
+    end + case
+        when dt >= date '2025-09-24'
+            then 0
+        else if(
+            spark_share > 0,
+            daily_payout_value * spark_share,
+            0
+        )
+    end as daily_actual_revenue,
+    case
+        when dt >= date '2025-09-24'
+            then 0
+        else if(m.daily_BR_cost > 0, daily_BR_cost, 0)
+    end as daily_BR_cost,
     m.usde_value,
     m.usde_withdrawal_value,
     m.susde_value,
