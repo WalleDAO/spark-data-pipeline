@@ -69,7 +69,7 @@ syrup_indices as (
             from maplefinance_v2_ethereum.pool_v2_evt_deposit
             where
                 contract_address = 0x80ac24aA929eaF5013f6436cdA2a7ba190f5Cc0b
-                and assets_>1 and shares_>1
+                and assets_>1e6 and shares_>1e6
             union all
             select
                 evt_block_time,
@@ -79,7 +79,7 @@ syrup_indices as (
             from maplefinance_v2_ethereum.pool_v2_evt_withdraw
             where
                 contract_address = 0x80ac24aA929eaF5013f6436cdA2a7ba190f5Cc0b
-                and assets_>1 and shares_>1
+                and assets_>1e6 and shares_>1e6
         )
     group by 1
 ),
@@ -110,20 +110,10 @@ syrup_apy as (
         dt,
         amount,
         (
-            supply_index / lag(supply_index, 7) over (
+            supply_index / lag(supply_index, 1) over (
                 order by dt asc
             ) - 1
-        ) / 7 * 365 as apr_7d,
-        (
-            supply_index / lag(supply_index, 30) over (
-                order by dt asc
-            ) - 1
-        ) / 30 * 365 as apr_30d,
-        (
-            supply_index / lag(supply_index, 90) over (
-                order by dt asc
-            ) - 1
-        ) / 90 * 365 as apr_90d
+        )  * 365 as supply_rate_apr
     from syrup_gaps ev
 ),
 syrup_rates as (
@@ -135,9 +125,7 @@ syrup_rates as (
         amount,
         i.reward_code as borrow_cost_code,
         i.reward_per as borrow_cost_apr,
-        apr_7d,
-        apr_30d,
-        apr_90d
+        supply_rate_apr
     from syrup_apy
     cross join query_5353955 i
     where
