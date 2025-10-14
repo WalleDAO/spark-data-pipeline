@@ -261,7 +261,7 @@ select
     m.daily_payout_value,
     m.total_holdings,
     m.spark_cumulative_withdrawal,
-    m.grove_holdings,
+    case when dt >= date '2025-09-24' then total_holdings else  m.grove_holdings end as grove_holdings ,
     if(m.spark_holdings > 0, m.spark_holdings, 0) as spark_holdings,
     if(m.spark_share > 0, m.spark_share, 0) as spark_share,
     s.avg_spark_share as daily_usde_pay_value_spark_share
