@@ -26,10 +26,12 @@ daily_prices AS (
         nav.net_asset_value as raw_price,
         COALESCE(
             nav.net_asset_value,
-            LAG(nav.net_asset_value) IGNORE NULLS OVER (ORDER BY ps.dt)
+            LAG(nav.net_asset_value) IGNORE NULLS OVER (
+                ORDER BY ps.dt
+            )
         ) AS uscc_price
     FROM price_seq ps
-    LEFT JOIN query_5582308 nav 
+    LEFT JOIN query_5582308 nav
         ON ps.dt = DATE(nav.net_asset_value_date)
 ),
 uscc_transfers AS (
@@ -131,14 +133,26 @@ final_data AS (
         dp.uscc_price,
         dp_prev.uscc_price AS uscc_price_prev,
         dp.uscc_price - dp_prev.uscc_price AS price_diff,
-        dh.cumulative_uscc_balance * (dp.uscc_price - dp_prev.uscc_price) AS gross_yield_usd,
+        COALESCE(
+            LAG(dh.cumulative_uscc_balance) OVER (
+                ORDER BY dh.date
+            ) * (dp.uscc_price - dp_prev.uscc_price),
+            0
+        ) AS gross_yield_usd,
         CASE
-            WHEN dh.cumulative_uscc_balance * dp.uscc_price <= 50000000 
+            WHEN dh.cumulative_uscc_balance * dp.uscc_price <= 50000000
                 THEN dh.cumulative_uscc_balance * dp.uscc_price * 0.0075 / 365
-            WHEN dh.cumulative_uscc_balance * dp.uscc_price <= 100000000 
-                THEN (50000000 * 0.0075 + (dh.cumulative_uscc_balance * dp.uscc_price - 50000000) * 0.005) / 365
-            ELSE 
-                (50000000 * 0.0075 + 50000000 * 0.005 + (dh.cumulative_uscc_balance * dp.uscc_price - 100000000) * 0.0025) / 365
+            WHEN dh.cumulative_uscc_balance * dp.uscc_price <= 100000000
+                THEN (
+                50000000 * 0.0075 + (
+                    dh.cumulative_uscc_balance * dp.uscc_price - 50000000
+                ) * 0.005
+            ) / 365
+            ELSE (
+                50000000 * 0.0075 + 50000000 * 0.005 + (
+                    dh.cumulative_uscc_balance * dp.uscc_price - 100000000
+                ) * 0.0025
+            ) / 365
         END AS management_fee,
         dh.cumulative_usdc_sent * i.reward_per / 365 AS borrow_cost_usd,
         i.reward_code as borrow_cost_code,
@@ -151,7 +165,8 @@ final_data AS (
     CROSS JOIN query_5353955 i
     WHERE
         i.reward_code = 'BR'
-        AND dh.date BETWEEN i.start_dt AND i.end_dt
+        AND dh.date BETWEEN i.start_dt
+        AND i.end_dt
 )
 SELECT
     dt,
@@ -166,18 +181,21 @@ SELECT
     price_diff,
     price_diff / uscc_price_prev * 365 as supply_rate_apr,
     CASE
-        WHEN uscc_holdings * uscc_price <= 50000000 
+        WHEN uscc_holdings * uscc_price <= 50000000
             THEN 0.0075
-        WHEN uscc_holdings * uscc_price <= 100000000 
-            THEN (50000000 * 0.0075 + (uscc_holdings * uscc_price - 50000000) * 0.005) / (uscc_holdings * uscc_price)
-        ELSE 
-            (50000000 * 0.0075 + 50000000 * 0.005 + (uscc_holdings * uscc_price - 100000000) * 0.0025) / (uscc_holdings * uscc_price)
+        WHEN uscc_holdings * uscc_price <= 100000000
+            THEN (
+            50000000 * 0.0075 + (uscc_holdings * uscc_price - 50000000) * 0.005
+        ) / (uscc_holdings * uscc_price)
+        ELSE (
+            50000000 * 0.0075 + 50000000 * 0.005 + (uscc_holdings * uscc_price - 100000000) * 0.0025
+        ) / (uscc_holdings * uscc_price)
     END as management_fee_apr,
     usdc_deployed,
     borrow_cost_code,
     borrow_cost_apr,
-     1 as price_usd,
-     'uscc_holdings * (uscc_price - uscc_price_prev)' as gross_yield_formula,
+    1 as price_usd,
+    'LAG(uscc_holdings) * (uscc_price - uscc_price_prev)' as gross_yield_formula,
     gross_yield_usd,
     'uscc_holdings_usd * (0.75% first $50M + 0.5% next $50M + 0.25% over $100M)' as management_fee_formula,
     management_fee,
