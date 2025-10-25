@@ -231,7 +231,7 @@ sp_balances_index as (
         if(
         365 * (exp(ln(1 + 0.08) / 365) - 1) - rd.supply_rate_apr > 0,
         365 * (exp(ln(1 + 0.08) / 365) - 1) - rd.supply_rate_apr,
-        0) as avalanche_reward_per,
+        0) as avalanche_reward_apr,
         rd.borrow_rate_apr,
         b.alm_supply_amount * rd.supply_index as alm_supply_amount,
         b.supply_amount * rd.supply_index as supply_amount,
