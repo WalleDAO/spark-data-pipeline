@@ -1,0 +1,14 @@
+# Configuration files
+config.py
+*.config
+.env
+
+# Python
+__pycache__/
+s
+*.log
+venv
+.zshrc
+
+# csv
+.csv
