@@ -1,0 +1,5 @@
+# Dune API
+DUNE_API_KEY_WALLE = ""
+
+# ARKHAM API
+ARKHAM_API_KEY = ""

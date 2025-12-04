@@ -2,9 +2,11 @@
 config.py
 *.config
 .env
+config_test.py
 
 # Python
 __pycache__/
+test/
 s
 *.log
 venv
