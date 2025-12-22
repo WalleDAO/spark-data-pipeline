@@ -34,7 +34,6 @@ class LabelService:
         self,
         api_key: str,
         base_url: str = "https://api.arkm.com",
-        request_delay: float = 0.05,
         max_workers: int = 5,
         max_retries: int = 10,
     ):
@@ -48,7 +47,7 @@ class LabelService:
             max_workers: Maximum number of concurrent threads for batch processing
             max_retries: Maximum number of retry attempts for failed addresses
         """
-        self.arkham_api = ArkhamApi(api_key, base_url, request_delay)
+        self.arkham_api = ArkhamApi(api_key, base_url)
         self.max_workers = max_workers
         self.max_retries = max_retries
         # Use fine-grained locks for better thread safety

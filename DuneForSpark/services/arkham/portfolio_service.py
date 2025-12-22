@@ -1,253 +1,383 @@
-import time
-from .portfolio_model import WalletPortfolio
-from .arkham_api import ArkhamApi
 import csv
 import os
 from datetime import datetime
-from typing import List, Tuple, Optional
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
+from typing import List, Tuple, Optional
+from dataclasses import dataclass
 
-_MAX_WORKERS = 10  # Maximum number of concurrent worker threads
-_BATCH_SIZE = 1000  # Number of addresses to process in each batch
+from .arkham_api import ArkhamApi
+from .portfolio_model import WalletPortfolio
 
 
-def _process_single_address(
-    arkham_api: ArkhamApi, address: str, time_param, index: int, total: int
-) -> Tuple[bool, Optional[WalletPortfolio]]:
+@dataclass
+class PortfolioProcessResult:
+    """Data class for portfolio processing results"""
+
+    address: str
+    wallet_portfolio: Optional[WalletPortfolio]
+    is_success: bool
+    error_message: Optional[str] = None
+
+
+class PortfolioService:
     """
-    Process a single wallet address and retrieve its portfolio data.
+    Service for batch processing wallet portfolios from Arkham Intelligence API.
 
-    This function queries the Arkham API for portfolio information about a specific
-    wallet address and handles both successful and failed requests, returning a tuple
-    indicating success status and the portfolio data if available.
-
-    Args:
-        arkham_api: ArkhamApi instance for API communication
-        address: Wallet address to process
-        time_param: Timestamp parameter for historical data query
-        index: Current index in the batch (for logging)
-        total: Total number of addresses in the batch (for logging)
-
-    Returns:
-        Tuple[bool, Optional[WalletPortfolio]]: Success flag and portfolio object if successful
+    This class provides functionality to query wallet portfolios for multiple addresses
+    concurrently with retry mechanism, process the results, and export them to CSV format.
+    It manages API interactions, thread-safe operations, and file export capabilities.
     """
-    try:
-        wallet_portfolio = arkham_api.get_portfolio(address, time_param)
 
-        if wallet_portfolio:
-            print(f"[{index}/{total}] Success - {address}")
-            return True, wallet_portfolio
-        else:
-            print(f"[{index}/{total}] Failed - {address}")
-            return False, None
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str = "https://api.arkm.com",
+        max_workers: int = 5,
+        max_retries: int = 10,
+        batch_delay: float = 2.0,
+    ):
+        """
+        Initialize the PortfolioService.
 
-    except Exception as e:
-        print(f"[{index}/{total}] Exception - {address}: {str(e)}")
-        return False, None
+        Args:
+            api_key: API key for authentication with Arkham Intelligence
+            base_url: Base URL for the Arkham API endpoint
+            request_delay: Delay in seconds between consecutive API requests
+            max_workers: Maximum number of concurrent threads for batch processing
+            max_retries: Maximum number of retry attempts for failed addresses
+            batch_delay: Delay in seconds between retry rounds
+        """
+        self.arkham_api = ArkhamApi(api_key, base_url)
+        self.max_workers = max_workers
+        self.max_retries = max_retries
+        self.batch_delay = batch_delay
+        # Use fine-grained locks for better thread safety
+        self.results_lock = threading.Lock()
+        self.failed_lock = threading.Lock()
 
+    def process_single_address(
+        self, address: str, time_param: Optional[int], index: int, total: int
+    ) -> PortfolioProcessResult:
+        """
+        Process a single wallet address and retrieve its portfolio data.
 
-def _batch_process_addresses(
-    addresses: List[str], arkham_api: ArkhamApi, time_param=None
-) -> List[WalletPortfolio]:
-    """
-    Process multiple wallet addresses in batches using concurrent threads.
+        This method queries the Arkham API for portfolio information about a specific
+        wallet address and handles both successful and failed requests by returning
+        PortfolioProcessResult objects with detailed status information.
 
-    This function divides the address list into batches and processes each batch
-    concurrently using a thread pool. It includes inter-batch delays to avoid
-    overwhelming the API and collects successful results.
+        Args:
+            address: Wallet address to process
+            time_param: Optional timestamp parameter for historical data query
+            index: Current index in the batch (for logging purposes)
+            total: Total number of addresses in the batch (for logging purposes)
 
-    Args:
-        addresses: List of wallet addresses to process
-        arkham_api: ArkhamApi instance for API communication
-        time_param: Optional timestamp parameter for historical data query
+        Returns:
+            PortfolioProcessResult: Contains portfolio data, success status, and error info
+        """
+        try:
+            wallet_portfolio = self.arkham_api.get_portfolio(address, time_param)
 
-    Returns:
-        List[WalletPortfolio]: List of successfully retrieved portfolio objects
-    """
-    results = []
-    total_count = len(addresses)
+            if wallet_portfolio:
+                print(f"[{index}/{total}] ✅ Success - {address}")
+                return PortfolioProcessResult(
+                    address=address, wallet_portfolio=wallet_portfolio, is_success=True
+                )
+            else:
+                print(f"[{index}/{total}] ❌ Failed - {address}")
+                return PortfolioProcessResult(
+                    address=address,
+                    wallet_portfolio=None,
+                    is_success=False,
+                    error_message="API returned no portfolio data",
+                )
+        except Exception as e:
+            print(f"[{index}/{total}] ❌ Error - {address}: {str(e)}")
+            return PortfolioProcessResult(
+                address=address,
+                wallet_portfolio=None,
+                is_success=False,
+                error_message=str(e),
+            )
 
-    batches = [
-        addresses[i : i + _BATCH_SIZE] for i in range(0, len(addresses), _BATCH_SIZE)
-    ]
+    def process_batch_single_round(
+        self, addresses: List[str], time_param: Optional[int], round_number: int
+    ) -> Tuple[List[WalletPortfolio], List[str]]:
+        """
+        Process a batch of addresses in a single round.
 
-    for batch_index, batch in enumerate(batches):
-        batch_results = []
-        batch_size = len(batch)
+        This method handles concurrent processing of addresses using ThreadPoolExecutor
+        and collects results in a thread-safe manner.
+
+        Args:
+            addresses: List of addresses to process
+            time_param: Optional timestamp parameter for historical data query
+            round_number: Current round number for logging
+
+        Returns:
+            Tuple[List[WalletPortfolio], List[str]]: (successful results, failed addresses)
+        """
+        successful_portfolios: List[WalletPortfolio] = []
+        failed_addresses: List[str] = []
+        total_count = len(addresses)
+
+        print(f"\n--- Round {round_number}: Processing {total_count} addresses ---")
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            # Submit all tasks
+            future_to_address = {}
+            for i, addr in enumerate(addresses, 1):
+                future = executor.submit(
+                    self.process_single_address, addr, time_param, i, total_count
+                )
+                future_to_address[future] = addr
+
+            # Collect results
+            for future in as_completed(future_to_address):
+                address = future_to_address[future]
+                try:
+                    result = future.result(
+                        timeout=60
+                    )  # Longer timeout for portfolio API
+
+                    # Thread-safe result processing
+                    if result.is_success and result.wallet_portfolio:
+                        with self.results_lock:
+                            successful_portfolios.append(result.wallet_portfolio)
+                    else:
+                        with self.failed_lock:
+                            failed_addresses.append(address)
+
+                except Exception as e:
+                    print(f"Future execution failed for {address}: {str(e)}")
+                    with self.failed_lock:
+                        failed_addresses.append(address)
+
+        # Output round statistics
+        success_count = len(successful_portfolios)
+        failed_count = len(failed_addresses)
         print(
-            f"Processing batch {batch_index + 1}/{len(batches)}, containing {batch_size} addresses"
+            f"Round {round_number} completed: {success_count} successful, {failed_count} failed"
         )
 
-        with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as executor:
-            futures = []
-            for i, addr in enumerate(batch, 1):
-                global_index = batch_index * _BATCH_SIZE + i
-                future = executor.submit(
-                    _process_single_address,
-                    arkham_api,
-                    addr,
-                    time_param,
-                    global_index,
-                    total_count,
+        return successful_portfolios, failed_addresses
+
+    def batch_process_addresses_concurrent(
+        self, addresses: List[str], time_param: Optional[int] = None
+    ) -> List[WalletPortfolio]:
+        """
+        Process multiple wallet addresses concurrently with retry mechanism.
+
+        This method implements a retry loop that processes failed addresses up to
+        max_retries times. It distributes address processing across multiple worker
+        threads to improve performance and handles failures gracefully.
+
+        Args:
+            addresses: List of wallet addresses to process
+            time_param: Optional timestamp parameter for historical data query
+
+        Returns:
+            List[WalletPortfolio]: List of portfolio objects for all successfully processed addresses
+        """
+        if not addresses:
+            return []
+
+        all_successful_portfolios: List[WalletPortfolio] = []
+        current_addresses = addresses.copy()
+        circle_count = 0
+
+        print(
+            f"Starting batch processing of {len(addresses)} addresses with up to {self.max_retries} retries..."
+        )
+
+        while current_addresses and circle_count < self.max_retries:
+            circle_count += 1
+
+            # Process current batch
+            successful_portfolios, failed_addresses = self.process_batch_single_round(
+                current_addresses, time_param, circle_count
+            )
+
+            # Accumulate successful results
+            all_successful_portfolios.extend(successful_portfolios)
+
+            # Check if retry is needed
+            if failed_addresses:
+                if circle_count < self.max_retries:
+                    print(
+                        f"Preparing to retry {len(failed_addresses)} failed addresses..."
+                    )
+                    current_addresses = failed_addresses
+                    # Add delay before retry
+                    time.sleep(self.batch_delay)
+                else:
+                    # Maximum retries reached
+                    print(f"\n⚠️  Maximum retries ({self.max_retries}) reached!")
+                    self._print_final_failed_addresses(failed_addresses)
+                    break
+            else:
+                print(
+                    f"✅ All addresses processed successfully after {circle_count} rounds!"
                 )
-                futures.append(future)
+                break
 
-            for future in as_completed(futures):
-                try:
-                    success, portfolio = future.result()
-                    if success and portfolio:
-                        batch_results.append(portfolio)
-                except Exception as e:
-                    print(f"Task execution failed: {str(e)}")
+        return all_successful_portfolios
 
-        results.extend(batch_results)
+    def _print_final_failed_addresses(self, failed_addresses: List[str]) -> None:
+        """
+        Print final failed addresses that couldn't be processed.
 
-        if batch_index < len(batches) - 1:
-            wait_time = 2  # Delay in seconds between batches
-            print(f"Waiting {wait_time} seconds before processing next batch...")
-            time.sleep(wait_time)
+        Args:
+            failed_addresses: List of addresses that failed after all retries
+        """
+        if failed_addresses:
+            print(
+                f"\n❌ {len(failed_addresses)} addresses failed after {self.max_retries} retries:"
+            )
+            print("Failed addresses that may have persistent issues:")
+            for i, addr in enumerate(failed_addresses, 1):
+                print(f"  {i:3d}. {addr}")
+            print()
 
-    return results
+    def export_to_csv(
+        self, wallet_portfolios: List[WalletPortfolio], filename: str = None
+    ) -> Optional[str]:
+        """
+        Export wallet portfolio data to a CSV file.
 
+        This method writes portfolio data from multiple wallets to a CSV file,
+        organizing data by blockchain network and token. It automatically generates
+        a timestamped filename if none is provided and creates the data directory
+        if it does not exist.
 
-def _export_to_csv(
-    wallet_portfolios: List[WalletPortfolio], filename: str = None
-) -> Optional[str]:
-    """
-    Export wallet portfolio data to a CSV file.
+        Args:
+            wallet_portfolios: List of WalletPortfolio objects to export
+            filename: Optional custom filename for the CSV file (without path)
 
-    This function writes portfolio data from multiple wallets to a CSV file,
-    organizing data by blockchain network and token. It automatically generates
-    a timestamped filename if none is provided and creates the data directory
-    if it does not exist. The function also converts chain names for display
-    (e.g., 'arbitrum_one' to 'arbitrum').
+        Returns:
+            str: Full file path of the created CSV file, or None if export failed
+        """
+        if not wallet_portfolios:
+            print("No wallet portfolios to export")
+            return None
 
-    Args:
-        wallet_portfolios: List of WalletPortfolio objects to export
-        filename: Optional custom filename for the CSV file (without path)
+        if filename is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"ArcHam_portfolios_{timestamp}.csv"
 
-    Returns:
-        str: Full file path of the created CSV file, or None if export failed
-    """
-    if filename is None:
-        timestamp = datetime.now().strftime(
-            "%Y%m%d_%H%M%S"
-        )  # Current timestamp for auto-generated filename
-        filename = f"ArcHam_portfolios_{timestamp}.csv"
+        if not filename.endswith(".csv"):
+            filename += ".csv"
 
-    if not filename.endswith(".csv"):
-        filename += ".csv"
+        # Create data directory
+        data_dir = os.path.join(
+            os.path.dirname(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            ),
+            "data",
+        )
 
-    data_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        "data",  # Data directory relative to project root
-    )
+        os.makedirs(data_dir, exist_ok=True)
+        filepath = os.path.join(data_dir, filename)
 
-    os.makedirs(data_dir, exist_ok=True)
+        headers = [
+            "chain",  # Blockchain network name
+            "address",  # Wallet address
+            "symbol",  # Token symbol
+            "balance",  # Token balance amount
+            "price",  # Token price in USD
+            "usd",  # Total value in USD
+        ]
 
-    filepath = os.path.join(data_dir, filename)
+        # Supported blockchain networks
+        chains = ["arbitrum_one", "ethereum", "base", "optimism"]
+        row_count = 0
 
-    headers = [
-        "chain",  # Blockchain network name
-        "address",  # Wallet address
-        "symbol",  # Token symbol
-        "balance",  # Token balance amount
-        "price",  # Token price in USD
-        "usd",  # Total value in USD
-    ]
-    chains = [
-        "arbitrum_one",
-        "ethereum",
-        "base",
-        "optimism",
-    ]  # Supported blockchain networks
-    row_count = 0
-    try:
-        with open(filepath, "w", newline="", encoding="utf-8") as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow(headers)
+        try:
+            with open(filepath, "w", newline="", encoding="utf-8") as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(headers)
 
-            for wallet_portfolio in wallet_portfolios:
-                for (
-                    chain
-                ) in chains:  # Iterate through chains to check wallet data availability
-                    if chain in wallet_portfolio.networks:
-                        network = wallet_portfolio.networks[chain]
-                        display_chain = (
-                            "arbitrum" if chain == "arbitrum_one" else chain
-                        )  # Convert 'arbitrum_one' to 'arbitrum' for display
-                        for token_id, token in network.tokens.items():
-                            writer.writerow(
-                                [
-                                    display_chain,
-                                    wallet_portfolio.address,
-                                    token.symbol,
-                                    token.balance,
-                                    token.price,
-                                    token.usd,
-                                ]
+                for wallet_portfolio in wallet_portfolios:
+                    for chain in chains:
+                        if chain in wallet_portfolio.networks:
+                            network = wallet_portfolio.networks[chain]
+                            # Convert 'arbitrum_one' to 'arbitrum' for display
+                            display_chain = (
+                                "arbitrum" if chain == "arbitrum_one" else chain
                             )
-                            row_count += 1
+                            for token_id, token in network.tokens.items():
+                                writer.writerow(
+                                    [
+                                        display_chain,
+                                        wallet_portfolio.address,
+                                        token.symbol,
+                                        token.balance,
+                                        token.price,
+                                        token.usd,
+                                    ]
+                                )
+                                row_count += 1
 
-        print(f"CSV file created: {filepath}")
-        print(f"Total {row_count} rows written")
-        return filepath
+            print(f"Total {row_count} rows written")
+            return filepath
 
-    except Exception as e:
-        print(f"Error saving CSV file: {str(e)}")
+        except Exception as e:
+            print(f"Error saving CSV file: {str(e)}")
+            return None
+
+    def export_portfolios(
+        self,
+        addresses: List[str],
+        time_param: Optional[int] = None,
+        filename: Optional[str] = None,
+    ) -> Optional[str]:
+        """
+        Main method to export wallet portfolios for a batch of addresses.
+
+        This method orchestrates the entire workflow: validates input addresses,
+        processes them concurrently through the Arkham API with retry mechanism,
+        measures execution time, and exports the results to a CSV file in the data directory.
+
+        Args:
+            addresses: List of wallet addresses to process and export
+            time_param: Optional timestamp parameter for historical data query
+            filename: Optional custom filename for the CSV file
+
+        Returns:
+            str: Full file path of the created CSV file, or None if export failed
+        """
+        if not addresses:
+            print("No addresses provided")
+            return None
+
+        start_time = time.time()
+
+        # Process addresses with retry mechanism
+        wallet_portfolios = self.batch_process_addresses_concurrent(
+            addresses, time_param
+        )
+
+        end_time = time.time()
+        processing_time = end_time - start_time
+
+        # Output final statistics
+        print(f"\n{'='*60}")
+        print(f"Portfolio Processing Summary:")
+        print(f"  Total addresses: {len(addresses)}")
+        print(f"  Successfully processed: {len(wallet_portfolios)}")
+        print(f"  Failed addresses: {len(addresses) - len(wallet_portfolios)}")
+        print(f"  Success rate: {len(wallet_portfolios)/len(addresses)*100:.1f}%")
+        print(f"  Processing time: {processing_time:.2f} seconds")
+        print(f"{'='*60}\n")
+
+        # Export to CSV
+        if wallet_portfolios:
+            csv_path = self.export_to_csv(wallet_portfolios, filename)
+            if csv_path:
+                print(f"✅ CSV file created: {csv_path}")
+                return csv_path
+        else:
+            print("❌ No successful results to export")
+
         return None
-
-
-def export_Portfolios(
-    address_params: List[str],
-    arkham_api: ArkhamApi,
-    time_param: Optional[int] = None,
-    filename: Optional[str] = None,
-) -> Optional[str]:
-    """
-    Main function to export wallet portfolios for a batch of addresses.
-
-    This function orchestrates the entire workflow: validates input addresses,
-    processes them in batches using concurrent threads, measures execution time,
-    and exports the results to a CSV file. It provides detailed logging of the
-    processing progress and results.
-
-    Args:
-        address_params: List of wallet addresses to process and export
-        arkham_api: ArkhamApi instance for API communication
-        time_param: Optional timestamp parameter for historical data query
-        filename: Optional custom filename for the CSV file
-
-    Returns:
-        str: Full file path of the created CSV file, or None if no data was retrieved
-    """
-    if not address_params:
-        print("No address list provided")
-        return None
-
-    total_addresses = len(address_params)
-    print(f"Starting to process {total_addresses} addresses...")
-
-    start_time = time.time()  # Record start time for performance measurement
-
-    results = _batch_process_addresses(address_params, arkham_api, time_param)
-
-    end_time = time.time()  # Record end time for performance measurement
-    elapsed_time = end_time - start_time
-
-    success_count = len(results)
-    print(
-        f"Processing complete: {success_count}/{total_addresses} addresses successfully retrieved"
-    )
-    print(f"Total time: {elapsed_time:.2f} seconds")
-
-    if success_count == 0:
-        print("No data successfully retrieved, canceling CSV export")
-        return None
-
-    filepath = _export_to_csv(results, filename)
-
-    return filepath
-
-
-__all__ = ["export_Portfolios"]

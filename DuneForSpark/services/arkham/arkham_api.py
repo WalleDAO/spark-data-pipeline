@@ -1,7 +1,7 @@
 import requests
 import time
 import threading
-from typing import Optional, Dict, Any
+from typing import Optional
 from .portfolio_model import WalletPortfolio
 from .label_model import WalletLabel
 
@@ -19,7 +19,7 @@ class ArkhamApi:
         self,
         api_key: str,
         base_url: str = "https://api.arkm.com",  # Default Arkham API base URL
-        request_delay: float = 0.05,  # Delay between requests in seconds
+        request_delay: float = 0.07,  # Delay between requests in seconds
     ):
         """
         Initialize the ArkhamApi client.

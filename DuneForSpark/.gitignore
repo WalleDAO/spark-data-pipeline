@@ -14,3 +14,4 @@ venv
 
 # csv
 .csv
+data/

@@ -26,20 +26,22 @@ def main():
         {"name": "linkedin", "type": "varchar"},
     ]
     duneServiceWalle = TableApi(DUNE_API_KEY_WALLE)
-    isCreated = duneServiceWalle.createTable(
+    isTableCreated = duneServiceWalle.createTable(
         DUNE_TABLE_NAME_SPACE, DUNE_TABLE_NAME, DUNE_TABLE_DESCRIPTION, SCHEMA
     )
-    if not isCreated:
+    if not isTableCreated:
         return
-    address_params = duneServiceWalle.queryRowDataByTableId(DUNE_TABLE_ID, "user_addr")
 
-    isClear = duneServiceWalle.clearTable(DUNE_TABLE_NAME_SPACE, DUNE_TABLE_NAME)
-    if not isClear:
+    address_params = duneServiceWalle.queryRowDataByTableId(DUNE_TABLE_ID, "user_addr")
+    if not address_params:
         return
 
     labelService = LabelService(ARKHAM_API_KEY)
     file_path = labelService.export_labels(address_params)
 
+    isClear = duneServiceWalle.clearTable(DUNE_TABLE_NAME_SPACE, DUNE_TABLE_NAME)
+    if not isClear:
+        return
     duneServiceWalle.insertCsvToTable(file_path, DUNE_TABLE_NAME_SPACE, DUNE_TABLE_NAME)
 
 
