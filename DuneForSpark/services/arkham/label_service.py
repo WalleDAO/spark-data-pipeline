@@ -282,7 +282,11 @@ class LabelService:
             "twitter",  # Entity Twitter handle
             "crunchbase",  # Entity Crunchbase profile URL
             "linkedin",  # Entity LinkedIn profile URL
+            "update_date",  # 🆕 Date when this data was fetched
         ]
+
+        # 🆕 Get current date for all records
+        current_date = datetime.now().strftime("%Y-%m-%d")
 
         try:
             with open(filepath, "w", newline="", encoding="utf-8") as csvfile:
@@ -302,6 +306,7 @@ class LabelService:
                             wallet_label.twitter,
                             wallet_label.crunchbase,
                             wallet_label.linkedin,
+                            current_date,  # 🆕 Add update_date to each row
                         ]
                     )
 

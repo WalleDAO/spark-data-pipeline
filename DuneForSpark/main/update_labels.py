@@ -1,5 +1,6 @@
 import sys
 import os
+from datetime import datetime
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import DUNE_API_KEY_WALLE, ARKHAM_API_KEY
@@ -24,6 +25,7 @@ def main():
         {"name": "twitter", "type": "varchar"},
         {"name": "crunchbase", "type": "varchar"},
         {"name": "linkedin", "type": "varchar"},
+        {"name": "update_date", "type": "date"},  
     ]
     duneServiceWalle = TableApi(DUNE_API_KEY_WALLE)
     isTableCreated = duneServiceWalle.createTable(
@@ -38,10 +40,6 @@ def main():
 
     labelService = LabelService(ARKHAM_API_KEY)
     file_path = labelService.export_labels(address_params)
-
-    isClear = duneServiceWalle.clearTable(DUNE_TABLE_NAME_SPACE, DUNE_TABLE_NAME)
-    if not isClear:
-        return
     duneServiceWalle.insertCsvToTable(file_path, DUNE_TABLE_NAME_SPACE, DUNE_TABLE_NAME)
 
 
