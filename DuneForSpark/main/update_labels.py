@@ -27,19 +27,49 @@ def main():
         {"name": "linkedin", "type": "varchar"},
         {"name": "update_date", "type": "date"},  
     ]
+    
     duneServiceWalle = TableApi(DUNE_API_KEY_WALLE)
-    isTableCreated = duneServiceWalle.createTable(
-        DUNE_TABLE_NAME_SPACE, DUNE_TABLE_NAME, DUNE_TABLE_DESCRIPTION, SCHEMA
-    )
-    if not isTableCreated:
-        return
+    
+    # ====================
+    # Table creation (only runs if table doesn't exist)
+    # ====================
+    print("📋 Checking if table exists...")
+    try:
+        isTableCreated = duneServiceWalle.createTable(
+            DUNE_TABLE_NAME_SPACE, DUNE_TABLE_NAME, DUNE_TABLE_DESCRIPTION, SCHEMA
+        )
+        if isTableCreated:
+            print("✅ Table created successfully")
+        else:
+            print("ℹ️  Table already exists, continuing...")
+    except Exception as e:
+        print(f"⚠️  Table check: {str(e)}")
+        print("ℹ️  Assuming table exists, continuing...")
 
+    # ====================
+    # PRODUCTION MODE: Fetch addresses from Dune and call Arkham API
+    # ====================
+    print("📊 Fetching addresses from Dune...")
     address_params = duneServiceWalle.queryRowDataByTableId(DUNE_TABLE_ID, "user_addr")
+    
     if not address_params:
+        print("❌ No addresses found in Dune table")
         return
-
+    
+    print(f"✅ Found {len(address_params)} addresses")
+    
+    print("🔍 Fetching labels from Arkham API...")
     labelService = LabelService(ARKHAM_API_KEY)
     file_path = labelService.export_labels(address_params)
+    
+    if not file_path or not os.path.exists(file_path):
+        print("❌ Failed to get labels from Arkham")
+        return
+    
+    print(f"✅ Labels exported to: {file_path}")
+
+    # Upload CSV to Dune table (append mode)
+    print("📤 Uploading data to Dune...")
     duneServiceWalle.insertCsvToTable(file_path, DUNE_TABLE_NAME_SPACE, DUNE_TABLE_NAME)
 
 
